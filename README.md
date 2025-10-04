@@ -4,7 +4,7 @@ Chromakey video matting that runs entirely in your browser and exports animated 
 
 ## Live Demo
 
-https://video-matting-to-svg-040p3er30m46.gigass.deno.net/
+https://video-matting-to-svg.gigass.deno.net/
 
 ## Highlights
 
@@ -145,7 +145,7 @@ MIT — see `LICENSE`.
 Chromakey video matting that runs entirely in your browser and exports animated SVG. No installation, no uploads — processing is fully local.
 
 ### Live Demo <a id="en-live-demo"></a>
-https://video-matting-to-svg-040p3er30m46.gigass.deno.net/
+https://video-matting-to-svg.gigass.deno.net/
 
 ### Highlights <a id="en-highlights"></a>
 - WebGL‑accelerated chroma key with interactive color picking (click or drag to sample)
@@ -226,7 +226,7 @@ MIT — see `LICENSE`.
 在浏览器中完成视频色度抠图，并导出为可循环播放的 SVG 动画。无需安装、无需上传，所有处理均在本地完成。
 
 ### 在线预览 <a id="zh-demo"></a>
-https://video-matting-to-svg-040p3er30m46.gigass.deno.net/
+https://video-matting-to-svg.gigass.deno.net/
 
 ### 主要特性 <a id="zh-highlights"></a>
 - WebGL 加速抠像，支持点击/框选拾取键色

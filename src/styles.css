@@ -39,6 +39,20 @@ body {
 }
 .app-header h1 { font-size: 18px; margin: 0; letter-spacing: .2px; }
 .actions { display: flex; gap: 8px; }
+/* Generic anchor button to match <button> */
+.btn {
+  display: inline-block;
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  text-decoration: none;
+  box-shadow: var(--shadow-sm);
+  transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease, transform .05s ease;
+}
+.btn:hover { border-color: var(--accent-weak); box-shadow: 0 0 0 3px var(--ring); }
+.btn:active { transform: translateY(1px); }
 /* Make the language select visually consistent with buttons */
 .actions #langSelect {
   -webkit-appearance: none;
