@@ -100,49 +100,68 @@
           </div>
         </div>
 
-        <div class="panel">
-          <h2>导出 SVG 动画（透明）</h2>
-          <div class="row">
-            <label for="fpsInput">帧率</label>
-            <input id="fpsInput" type="number" min="1" max="24" step="1" value="8" />
-            <span class="val" id="fpsNote">建议 6–12</span>
+        <div class="panel export-panel">
+          <h2>导出 SVG 动画</h2>
+          <div class="export-grid">
+            <div class="row row-inline">
+              <label for="fpsInput">帧率</label>
+              <input id="fpsInput" type="number" min="1" max="24" step="1" value="8" />
+              <span class="help" id="fpsNote">建议 6–12</span>
+            </div>
+
+            <div class="row row-inline">
+              <label for="scaleSelect">分辨率</label>
+              <select id="scaleSelect">
+                <option value="1" selected>100%</option>
+                <option value="0.75">75%</option>
+                <option value="0.5">50%</option>
+                <option value="0.25">25%</option>
+              </select>
+              <span class="help" id="scaleInfo"></span>
+            </div>
+
+            <div class="row row-inline">
+              <label for="frameFormat">帧编码</label>
+              <select id="frameFormat">
+                <option value="webp" selected>WebP</option>
+                <option value="png">PNG</option>
+              </select>
+              <span class="help" id="fmtSupport"></span>
+            </div>
+
+            <div class="row row-inline">
+              <label for="webpQuality">质量</label>
+              <div class="field-inline">
+                <input id="webpQuality" type="range" min="0.4" max="0.95" step="0.05" value="0.4" />
+                <span class="val" id="webpQVal">0.40</span>
+              </div>
+              <span></span>
+            </div>
+
+            <div class="row row-inline">
+              <label for="previewBgInput">预览背景图</label>
+              <div class="field-inline">
+                <label class="file-btn file-btn-light">
+                  <input id="previewBgInput" type="file" accept="image/*" />
+                  选择图像
+                </label>
+                <button id="clearPreviewBgBtn" type="button" class="btn-ghost">清除</button>
+              </div>
+              <span class="help" id="previewBgName"></span>
+            </div>
+
+            <div class="row row-inline">
+              <label for="includeBgCheck">包含背景</label>
+              <label class="toggle">
+                <input id="includeBgCheck" type="checkbox" />
+              </label>
+              <span></span>
+            </div>
           </div>
-          <div class="row">
-            <label for="scaleSelect">分辨率</label>
-            <select id="scaleSelect">
-              <option value="1" selected>100%</option>
-              <option value="0.75">75%</option>
-              <option value="0.5">50%</option>
-              <option value="0.25">25%</option>
-            </select>
-            <span class="val"></span>
-          </div>
-          <div class="row">
-            <label for="previewBgInput">预览背景图</label>
-            <input id="previewBgInput" type="file" accept="image/*" />
-            <button id="clearPreviewBgBtn" type="button">清除</button>
-          </div>
-          <div class="row">
-            <label for="frameFormat">帧编码</label>
-            <select id="frameFormat">
-              <option value="webp" selected>WebP</option>
-              <option value="png">PNG</option>
-            </select>
-            <span class="val" id="fmtSupport"></span>
-          </div>
-          <div class="row">
-            <label for="includeBgCheck">包含背景</label>
-            <input id="includeBgCheck" type="checkbox" />
-            <span class="val">勾选后导出的 SVG 内嵌背景</span>
-          </div>
-          <div class="row">
-            <label for="webpQuality">质量</label>
-            <input id="webpQuality" type="range" min="0.4" max="0.95" step="0.05" value="0.4" />
-            <span class="val" id="webpQVal">0.40</span>
-          </div>
-          <div class="row">
+
+          <div class="actions-row">
             <button id="exportSvgAnimBtn" disabled>开始导出 SVG</button>
-            <button id="cancelSvgExportBtn" disabled>取消</button>
+            <button id="cancelSvgExportBtn" disabled class="btn-ghost">取消</button>
           </div>
           <div class="progress" id="progress" aria-label="导出进度">
             <div class="bar" id="progressBar"></div>

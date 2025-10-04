@@ -30,6 +30,8 @@
     fmtSupport: document.getElementById('fmtSupport'),
     webpQuality: document.getElementById('webpQuality'),
     webpQVal: document.getElementById('webpQVal'),
+    scaleInfo: document.getElementById('scaleInfo'),
+    previewBgName: document.getElementById('previewBgName'),
     progress: document.getElementById('progress'),
     progressBar: document.getElementById('progressBar'),
     progressPct: document.getElementById('progressPct'),
@@ -581,6 +583,8 @@ function loopRVFC(now, metadata) {
   els.exportSvgAnimBtn.addEventListener('click', startExportSvgAnimation);
   els.cancelSvgExportBtn.addEventListener('click', cancelExportSvg);
   if (els.scaleSelect) els.scaleSelect.addEventListener('change', ()=>{ state.scale = Math.max(0.1, Math.min(1, parseFloat(els.scaleSelect.value)||0.5)); });
+  // 更新分辨率实际像素显示
+  if (els.scaleSelect) els.scaleSelect.addEventListener('change', updateScaleInfo);
   if (els.pixelSlider) els.pixelSlider.addEventListener('input', ()=>{ state.pixelSize = Math.max(1, Math.min(64, parseInt(els.pixelSlider.value||'1',10))); if (els.pixelVal) els.pixelVal.textContent = String(state.pixelSize); renderFrame(); });
   // 预览背景上传/清除
   const bgInput = document.getElementById('previewBgInput');
@@ -594,12 +598,14 @@ function loopRVFC(now, metadata) {
     fr.onload = () => { state.previewBgDataUrl = String(fr.result||''); };
     try { fr.readAsDataURL(f); } catch(_) {}
     applyPreviewBg();
+    if (els.previewBgName) els.previewBgName.textContent = f.name || '';
   });
   if (bgClear) bgClear.addEventListener('click', () => {
     if (state.previewBgUrl) URL.revokeObjectURL(state.previewBgUrl);
     state.previewBgUrl = null;
     state.previewBgDataUrl = null;
     applyPreviewBg();
+    if (els.previewBgName) els.previewBgName.textContent = '';
   });
   const includeBgCheck = document.getElementById('includeBgCheck');
   if (includeBgCheck) includeBgCheck.addEventListener('change', ()=>{ state.includeBg = includeBgCheck.checked; });
@@ -799,6 +805,7 @@ function loopRVFC(now, metadata) {
     // prepare sample canvas for pixel read
     els.sampleCanvas.width = els.video.videoWidth;
     els.sampleCanvas.height = els.video.videoHeight;
+    updateScaleInfo();
 
     // start render loop
     if (rvfcSupported) {
@@ -1108,6 +1115,16 @@ function loopRVFC(now, metadata) {
     if (!els.fmtSupport) return;
     const ok = state.frameFormat === 'webp' ? supportsWebP() : true;
     els.fmtSupport.textContent = ok ? '' : '此浏览器不支持 WebP，已回退 PNG';
+  }
+
+  function updateScaleInfo() {
+    if (!els.scaleInfo) return;
+    const vw = els.video.videoWidth|0, vh = els.video.videoHeight|0;
+    const s = Math.max(0.1, Math.min(1, state.scale||parseFloat(els.scaleSelect?.value||'1')||1));
+    if (!state.hasVideo || !vw || !vh) { els.scaleInfo.textContent = ''; return; }
+    const outW = Math.max(1, Math.round(vw * s));
+    const outH = Math.max(1, Math.round(vh * s));
+    els.scaleInfo.textContent = `实际导出：${outW}×${outH}`;
   }
 
   function updateWebPUI() {
