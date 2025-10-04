@@ -278,9 +278,20 @@ input[type="range"]::-ms-thumb {
 .drop-zone.dragover { background: linear-gradient(180deg, #f9fbff, #eef2ff); }
 .export-panel .row-inline {
   display: grid;
-  grid-template-columns: 68px 1fr auto;
+  /* Let the label fit its content to avoid wrapping */
+  grid-template-columns: max-content 1fr auto;
   align-items: center;
   gap: 4px;
 }
-.export-panel .row-inline > label { margin: 0; font-weight: 600; color: var(--text); }
-.export-panel .row-inline .help { color: var(--muted); font-size: 12px; text-align: right; white-space: nowrap; }
+.export-panel .row-inline > label { margin: 0; font-weight: 600; color: var(--text); white-space: nowrap; }
+/* Keep helper text on one line and truncate with ellipsis */
+.export-panel .row-inline .help {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  justify-self: end;
+}
