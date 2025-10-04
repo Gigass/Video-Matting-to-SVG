@@ -35,6 +35,16 @@
     progressPct: document.getElementById('progressPct'),
     exportResult: document.getElementById('exportResult'),
     status: document.getElementById('status'),
+    playPauseBtn: document.getElementById('playPauseBtn'),
+    seekbar: document.getElementById('seekbar'),
+    timeLabel: document.getElementById('timeLabel'),
+    addClipBtn: document.getElementById('addClipBtn'),
+    toolBrushAdd: document.getElementById('toolBrushAdd'),
+    toolBrushErase: document.getElementById('toolBrushErase'),
+    // rectangle tools removed per request
+    brushSize: document.getElementById('brushSize'),
+    clipsTrack: document.getElementById('clipsTrack'),
+    deleteClipBtn: document.getElementById('deleteClipBtn'),
   };
 
   const state = {
@@ -56,6 +66,14 @@
     previewBgUrl: null,
     previewBgDataUrl: null,
     includeBg: false,
+    duration: 0,
+    isPlaying: false,
+    isPainting: false,
+    isDraggingTimeline: false,
+    clips: [],
+    tool: 'brushAdd',
+    brushSize: parseInt((document.getElementById('brushSize')||{value:'18'}).value,10)||18,
+    activeClipId: null,
   };
 
   const bgModeInputs = Array.from(document.querySelectorAll('input[name="bgMode"]'));
@@ -89,6 +107,8 @@
     uniform vec2 u_viewSize;    // canvas size in pixels
     uniform float u_pixel;      // pixelation block size in output pixels
     uniform float u_sharpen;    // 0..1 amount
+    uniform sampler2D u_mask;   // exclusion mask (0..1), 1 means use original video
+    uniform int u_hasMask;
 
     // simple linearization for sRGB
     vec3 toLinear(vec3 c) {
@@ -131,8 +151,14 @@
         spillFixed = mix(col, rest, u_spill * (1.0 - alpha));
       }
 
-      vec3 outRGB = spillFixed;
-      vec4 outColor = vec4(toSRGB(outRGB), alpha);
+      // apply exclusion mask
+      float m = 0.0;
+      if (u_hasMask == 1) {
+        m = texture2D(u_mask, v_uv).r;
+      }
+      vec3 outRGB = mix(spillFixed, col, m);
+      float outA = mix(alpha, 1.0, m);
+      vec4 outColor = vec4(toSRGB(outRGB), outA);
 
       if (u_bgMode == 1) {
         // composite over solid bg in linear space
@@ -160,6 +186,8 @@
     u_viewSize: gl.getUniformLocation(program, 'u_viewSize'),
     u_pixel: gl.getUniformLocation(program, 'u_pixel'),
     u_sharpen: gl.getUniformLocation(program, 'u_sharpen'),
+    u_mask: gl.getUniformLocation(program, 'u_mask'),
+    u_hasMask: gl.getUniformLocation(program, 'u_hasMask'),
   };
 
   // fullscreen quad
@@ -179,6 +207,14 @@
   // texture for video frame
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+  // mask texture (for exclusion areas)
+  const maskTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, maskTex);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -211,6 +247,16 @@
     els.canvas.width = Math.round(cw * dpr);
     els.canvas.height = Math.round(ch * dpr);
     gl.viewport(0, 0, els.canvas.width, els.canvas.height);
+    // align post overlay to preview size and centered position
+    const post = document.getElementById('post');
+    if (post) {
+      post.width = els.canvas.width; post.height = els.canvas.height;
+      post.style.width = `${cw|0}px`; post.style.height = `${ch|0}px`;
+      const dz = els.dropZone.getBoundingClientRect();
+      const left = Math.max(0, ((dz.width - (cw|0)) / 2));
+      const top = Math.max(0, ((dz.height - (ch|0)) / 2));
+      post.style.left = `${left}px`; post.style.top = `${top}px`;
+    }
   }
 
   function renderFrame() {
@@ -249,21 +295,164 @@
     gl.uniform1f(uniforms.u_pixel, px);
     gl.uniform1f(uniforms.u_sharpen, Math.max(0.0, Math.min(1.0, state.sharpen || 0)));
 
+    // upload composite mask (union of clips active at current time)
+    let hasMask = 0;
+    const activeMask = (function(){
+      const t = els.video.currentTime||0;
+      const hits = state.clips.filter(c => c.visible !== false && t>=c.start && t<=c.end);
+      if (!hits.length) return null;
+      if (!renderFrame._comp) {
+        renderFrame._comp = document.createElement('canvas');
+        renderFrame._compCtx = renderFrame._comp.getContext('2d', { willReadFrequently:true });
+      }
+      const c = renderFrame._comp, ctx = renderFrame._compCtx;
+      if (c.width !== els.canvas.width || c.height !== els.canvas.height) { c.width = els.canvas.width; c.height = els.canvas.height; }
+      ctx.clearRect(0,0,c.width,c.height);
+      for (const h of hits){ ctx.drawImage(h.maskCanvas, 0,0, h.maskCanvas.width, h.maskCanvas.height, 0,0, c.width, c.height); }
+      return c;
+    })();
+    if (activeMask) {
+      hasMask = 1;
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, maskTex);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, activeMask);
+      gl.uniform1i(uniforms.u_mask, 1);
+    }
+    gl.uniform1i(uniforms.u_hasMask, hasMask);
+
     gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+    // Draw mask overlay tint (red) for SELECTED clip; also draw brush cursor ring
+    const post = document.getElementById('post');
+    if (post) {
+      // Prefer selected clip's mask for visibility, fallback to time-hit clip
+      let clip = state.clips.find(c => c.id === state.activeClipId) || null;
+      if (clip && clip.maskCanvas) {
+        if (!renderFrame._postCtx) renderFrame._postCtx = post.getContext('2d', { willReadFrequently: true });
+        const ctx2d = renderFrame._postCtx;
+        // ensure post canvas aligns to preview size
+        if (post.width !== els.canvas.width || post.height !== els.canvas.height) {
+          post.width = els.canvas.width; post.height = els.canvas.height;
+        }
+        ctx2d.clearRect(0,0,post.width, post.height);
+        // draw mask alpha
+        ctx2d.drawImage(clip.maskCanvas, 0,0, clip.maskCanvas.width, clip.maskCanvas.height, 0,0, post.width, post.height);
+        // tint
+        ctx2d.globalCompositeOperation='source-in';
+        ctx2d.fillStyle='rgba(255,0,0,0.30)';
+        ctx2d.fillRect(0,0,post.width, post.height);
+        ctx2d.globalCompositeOperation='source-over';
+        // draw brush cursor ring
+        if (state.isPainting && (state.tool==='brushAdd' || state.tool==='brushErase')) {
+          const color = state.tool==='brushAdd' ? 'rgba(255,255,0,0.9)' : 'rgba(0,120,255,0.9)';
+          // last cursor stored by mousemove via getCanvasPixelPos; we can compute from event each time but here not retained.
+          // As fallback, skip unless we have lastCursor on state
+          const lc = state.lastCursor;
+          if (lc) {
+            ctx2d.save();
+            ctx2d.strokeStyle = color;
+            ctx2d.lineWidth = 2;
+            const scale = Math.max(clip.maskCanvas.width/post.width, clip.maskCanvas.height/post.height);
+            const r = (state.brushSize||18);
+            ctx2d.beginPath(); ctx2d.arc(lc.x, lc.y, r, 0, Math.PI*2); ctx2d.stroke(); ctx2d.restore();
+          }
+        }
+        post.style.display='block';
+      } else {
+        post.style.display='none';
+      }
+    }
   }
 
-  function loopRAF() {
-    renderFrame();
-    rafId = requestAnimationFrame(loopRAF);
+  function getActiveMaskCanvas(){
+    if (!state.clips || !state.clips.length) return null;
+    const t = els.video.currentTime||0;
+    // 合并当前时间命中的片段掩模（先取第一个；后续可合并）
+    for (const c of state.clips){
+      if (c.visible && t>=c.start && t<=c.end) return c.maskCanvas;
+    }
+    return null;
   }
 
-  function loopRVFC() {
-    const cb = () => {
-      renderFrame();
-      els.video.requestVideoFrameCallback(loopRVFC);
-    };
-    return cb;
+  function getActiveClipAtCurrentTime(){
+    if (!state.clips || !state.clips.length) return null;
+    const t = els.video.currentTime || 0;
+    const hits = state.clips.filter(c => (c.visible !== false) && t >= c.start && t <= c.end);
+    if (!hits.length) return null;
+    const sel = hits.find(c => c.id === state.activeClipId);
+    return sel || hits[0];
   }
+
+  // Painting utilities: draw into clip.maskCanvas (white=exclude, black=normal)
+  function paintAt(clip, x, y, add){
+    if (!clip || !clip.ctx) return;
+    const mw = clip.maskCanvas.width, mh = clip.maskCanvas.height;
+    const vw = els.video.videoWidth||mw, vh = els.video.videoHeight||mh;
+    const sx = mw / vw, sy = mh / vh;
+    const ctx = clip.ctx;
+    ctx.save();
+    ctx.fillStyle = add ? 'rgba(255,255,255,1)' : 'rgba(0,0,0,1)';
+    ctx.beginPath();
+    const r = (state.brushSize||18) * Math.max(sx, sy);
+    ctx.arc(x*sx, y*sy, r, 0, Math.PI*2); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  function rectPaint(clip, a, b, add){
+    if (!clip || !clip.ctx) return;
+    const mw = clip.maskCanvas.width, mh = clip.maskCanvas.height;
+    const vw = els.video.videoWidth||mw, vh = els.video.videoHeight||mh;
+    const sx = mw / vw, sy = mh / vh;
+    const x0 = Math.min(a.x,b.x)*sx, y0 = Math.min(a.y,b.y)*sy;
+    const w = Math.abs(a.x-b.x)*sx, h = Math.abs(a.y-b.y)*sy;
+    const ctx = clip.ctx;
+    ctx.save();
+    ctx.fillStyle = add ? 'rgba(255,255,255,1)' : 'rgba(0,0,0,1)';
+    ctx.fillRect(x0, y0, w, h);
+    ctx.restore();
+  }
+
+  // Canvas-pixel based painting (uses preview canvas pixel coordinates)
+  function paintAtCanvas(clip, cx, cy, add){
+    if (!clip || !clip.ctx) return;
+    const ctx = clip.ctx;
+    // map preview canvas pixels -> mask canvas pixels (same aspect assumed)
+    const scaleX = clip.maskCanvas.width / (els.canvas.width||1);
+    const scaleY = clip.maskCanvas.height / (els.canvas.height||1);
+    const r = (state.brushSize||18) * Math.max(scaleX, scaleY);
+    ctx.save();
+    if (add) { ctx.globalCompositeOperation='source-over'; ctx.fillStyle='#ffffff'; }
+    else { ctx.globalCompositeOperation='destination-out'; ctx.fillStyle='#000000'; }
+    ctx.beginPath(); ctx.arc(cx*scaleX, cy*scaleY, r, 0, Math.PI*2); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  function rectPaintCanvas(clip, a, b, add){
+    if (!clip || !clip.ctx) return;
+    const ctx = clip.ctx;
+    const scaleX = clip.maskCanvas.width / (els.canvas.width||1);
+    const scaleY = clip.maskCanvas.height / (els.canvas.height||1);
+    const x0 = Math.min(a.x,b.x)*scaleX, y0 = Math.min(a.y,b.y)*scaleY;
+    const w = Math.abs(a.x-b.x)*scaleX, h = Math.abs(a.y-b.y)*scaleY;
+    ctx.save();
+    if (add) { ctx.globalCompositeOperation='source-over'; ctx.fillStyle='#ffffff'; }
+    else { ctx.globalCompositeOperation='destination-out'; ctx.fillStyle='#000000'; }
+    ctx.fillRect(x0,y0,w,h);
+    ctx.restore();
+  }
+
+function loopRAF() {
+  renderFrame();
+  if (typeof updateTimeUI === 'function') updateTimeUI();
+  rafId = requestAnimationFrame(loopRAF);
+}
+
+function loopRVFC(now, metadata) {
+  renderFrame();
+  if (typeof updateTimeUI === 'function') updateTimeUI();
+  try { els.video.requestVideoFrameCallback(loopRVFC); } catch (_) {}
+}
 
   // Event bindings
   els.fileInput.addEventListener('change', onFile);
@@ -309,48 +498,59 @@
 
   // Color pick (click or drag rectangle to average)
   let dragStart = null;
+  // Canvas interactions: picking or painting
   els.canvas.addEventListener('mousedown', (e) => {
-    if (!state.picking || !state.hasVideo) return;
-    dragStart = getCanvasPos(e);
-    showPickOverlay(dragStart, dragStart);
-    e.preventDefault();
+    if (!state.hasVideo) return;
+    const pos = getCanvasPos(e);
+    const cpos = getCanvasPixelPos(e);
+    if (state.picking) {
+      dragStart = pos; showPickOverlay(dragStart, dragStart); e.preventDefault(); return;
+    }
+    let clip = getActiveClipAtCurrentTime();
+    if (!clip) { addClip(0, state.duration||0); renderClips(); clip = getActiveClipAtCurrentTime(); }
+    if (clip) {
+      if (state.tool === 'rect' || state.tool === 'rectErase') { state.drawing = {startX: cpos.x, startY: cpos.y}; showPickOverlay({x:pos.x,y:pos.y},{x:pos.x,y:pos.y}, pos); }
+      else { state.isPainting = true; paintAtCanvas(clip, cpos.x, cpos.y, state.tool==='brushAdd'); renderFrame(); }
+      e.preventDefault();
+    }
   });
   window.addEventListener('mousemove', (e) => {
-    if (!state.picking || !state.hasVideo) return;
+    if (!state.hasVideo) return;
     const pos = getCanvasPos(e);
-    if (dragStart == null) {
-      // hover preview (small region)
-      const a = {x: Math.max(0,pos.x-2), y: Math.max(0,pos.y-2)};
-      const b = {x: Math.min(els.video.videoWidth-1,pos.x+2), y: Math.min(els.video.videoHeight-1,pos.y+2)};
-      updatePickPreview(a,b,pos);
-    } else {
-      // drag rectangle preview
-      updatePickPreview(dragStart, pos, pos);
+    const cpos = getCanvasPixelPos(e);
+    state.lastCursor = { x: Math.max(0, Math.min(els.canvas.width-1, Math.round((cpos.x/els.canvas.width)*els.canvas.width))),
+                         y: Math.max(0, Math.min(els.canvas.height-1, Math.round((cpos.y/els.canvas.height)*els.canvas.height))) };
+    if (state.picking) {
+      if (dragStart == null) {
+        const a = {x: Math.max(0,pos.x-2), y: Math.max(0,pos.y-2)};
+        const b = {x: Math.min(els.video.videoWidth-1,pos.x+2), y: Math.min(els.video.videoHeight-1,pos.y+2)};
+        updatePickPreview(a,b,pos);
+      } else {
+        updatePickPreview(dragStart, pos, pos);
+      }
+      e.preventDefault(); return;
     }
-    e.preventDefault();
+    const clip = getActiveClipAtCurrentTime();
+    if (clip) {
+      if ((state.tool === 'rect' || state.tool==='rectErase') && state.drawing) { showPickOverlay({x:Math.round(state.drawing.startX*(els.video.videoWidth/els.canvas.width)), y:Math.round(state.drawing.startY*(els.video.videoHeight/els.canvas.height))}, pos, pos); }
+      else if (state.tool !== 'rect' && state.isPainting && !state.isDraggingTimeline) { paintAtCanvas(clip, cpos.x, cpos.y, state.tool==='brushAdd'); renderFrame(); }
+    }
   });
   window.addEventListener('mouseup', (e) => {
-    if (!state.picking || dragStart == null) return;
-    const start = dragStart; dragStart = null;
-    const end = getCanvasPos(e);
-    pickFromRegion(start, end);
-    state.picking = false;
-    els.pickColorBtn.classList.remove('active');
-    els.canvas.classList.remove('picking');
-    hidePickOverlay();
-    state.previewKeyColor = null;
+    const pos = getCanvasPos(e);
+    state.isPainting = false;
+    if (state.picking && dragStart != null) {
+      const start = dragStart; dragStart = null; pickFromRegion(start, pos);
+      state.picking=false; els.pickColorBtn.classList.remove('active'); els.canvas.classList.remove('picking'); hidePickOverlay(); state.previewKeyColor=null; renderFrame();
+    }
+    const clip = getActiveClipAtCurrentTime();
+    if (clip && (state.tool === 'rect' || state.tool==='rectErase') && state.drawing) {
+      const a = state.drawing; state.drawing=null; hidePickOverlay();
+      const bCanvas = getCanvasPixelPos(e);
+      rectPaintCanvas(clip, a, bCanvas, state.tool==='rect'); renderFrame();
+    }
   });
-  els.canvas.addEventListener('click', (e) => {
-    if (!state.picking || !state.hasVideo) return;
-    const p = getCanvasPos(e);
-    pickFromRegion(p, p);
-    state.picking = false;
-    els.pickColorBtn.classList.remove('active');
-    els.canvas.classList.remove('picking');
-    hidePickOverlay();
-    state.previewKeyColor = null;
-    renderFrame();
-  });
+  els.canvas.addEventListener('mouseleave', ()=>{ state.isPainting = false; });
 
   els.resetBtn.addEventListener('click', () => {
     state.keyColor = [0.0, 1.0, 0.0]; setKeySwatch(state.keyColor.map(linearToSrgb01));
@@ -394,6 +594,149 @@
 
   window.addEventListener('resize', fitCanvasToVideo);
 
+  // Player controls
+  if (els.playPauseBtn) els.playPauseBtn.addEventListener('click', () => {
+    if (!state.hasVideo) return;
+    if (state.isPlaying) els.video.pause(); else els.video.play().catch(()=>{});
+  });
+  if (els.seekbar) {
+    els.seekbar.addEventListener('input', () => {
+      if (!state.hasVideo) return;
+      const t = parseFloat(els.seekbar.value||'0');
+      try { els.video.currentTime = Math.max(0, Math.min(state.duration, t)); } catch(_) {}
+      renderFrame();
+      updateTimeUI();
+    });
+  }
+  els.video.addEventListener('play', ()=>{ state.isPlaying = true; if (els.playPauseBtn) els.playPauseBtn.textContent='⏸'; });
+  els.video.addEventListener('pause', ()=>{ state.isPlaying = false; if (els.playPauseBtn) els.playPauseBtn.textContent='▶︎'; });
+
+  function updateTimeUI(){
+    if (!state.hasVideo || !els.seekbar) return;
+    els.seekbar.max = String(state.duration||0);
+    els.seekbar.value = String(els.video.currentTime||0);
+    if (els.timeLabel) els.timeLabel.textContent = `${fmtTime(els.video.currentTime||0)} / ${fmtTime(state.duration||0)}`;
+  }
+  function fmtTime(s){ const m = Math.floor(s/60)|0; const ss = s - m*60; return `${String(m).padStart(2,'0')}:${ss.toFixed(2).padStart(5,'0')}`; }
+
+  // Timeline tools
+  if (els.addClipBtn) els.addClipBtn.addEventListener('click', () => {
+    if (!state.hasVideo) return;
+    // 默认整段覆盖：从 0 到 duration
+    addClip(0, state.duration||0);
+    renderClips();
+  });
+  function setTool(t){
+    state.tool = t;
+    [els.toolBrushAdd, els.toolBrushErase].forEach(btn=>{ if (!btn) return; btn.classList.toggle('active', false); });
+    if (t==='brushAdd' && els.toolBrushAdd) els.toolBrushAdd.classList.add('active');
+    if (t==='brushErase' && els.toolBrushErase) els.toolBrushErase.classList.add('active');
+  }
+  if (els.toolBrushAdd) els.toolBrushAdd.addEventListener('click', ()=> setTool('brushAdd'));
+  if (els.toolBrushErase) els.toolBrushErase.addEventListener('click', ()=> setTool('brushErase'));
+  if (els.brushSize) els.brushSize.addEventListener('input', ()=>{ state.brushSize = parseInt(els.brushSize.value,10)||18; });
+  if (els.deleteClipBtn) els.deleteClipBtn.addEventListener('click', ()=>{ if (!state.activeClipId) return; deleteClip(state.activeClipId); renderClips(); renderFrame(); });
+
+  function addClip(start, end){
+    const id = Date.now()+Math.random();
+    const maskCanvas = document.createElement('canvas');
+    // 初版用预览分辨率，后续导出时可升至源分辨率
+    maskCanvas.width = els.canvas.width; maskCanvas.height = els.canvas.height;
+    const ctx = maskCanvas.getContext('2d', { willReadFrequently: true });
+    // 透明背景，alpha=0 表示不排除，白色（alpha=1）表示排除
+    ctx.clearRect(0,0,maskCanvas.width, maskCanvas.height);
+    state.clips.push({ id, start, end, maskCanvas, ctx, visible:true, selected:true });
+    state.activeClipId = id;
+  }
+  function renderClips(){
+    if (!els.clipsTrack) return;
+    const track = els.clipsTrack;
+    const trackW = track.clientWidth || 600;
+    track.innerHTML = '';
+    const rowH = 56; // 8px top margin + 40px bar + 8px bottom
+    track.style.height = `${Math.max(rowH, state.clips.length * rowH)}px`;
+    state.clips.forEach((clip, idx) => {
+      const div = document.createElement('div'); div.className = 'clip'+(clip.id===state.activeClipId?' selected':'');
+      const l = (clip.start/(state.duration||1))*trackW; const w = Math.max(6, ((clip.end-clip.start)/(state.duration||1))*trackW);
+      div.style.left = `${l}px`; div.style.width = `${w}px`; div.style.top = `${8 + idx*rowH}px`;
+      const label = document.createElement('span'); label.className='clip-label'; label.textContent = `片段${idx+1}`;
+      const hL = document.createElement('div'); hL.className='handle left';
+      const hR = document.createElement('div'); hR.className='handle right';
+      div.appendChild(label); div.appendChild(hL); div.appendChild(hR);
+      const btnReset = document.createElement('button'); btnReset.className='clip-btn reset'; btnReset.textContent='重置';
+      const btnDel = document.createElement('button'); btnDel.className='clip-btn del'; btnDel.textContent='✕';
+      btnReset.addEventListener('mousedown', (e)=>{ e.stopPropagation(); e.preventDefault(); });
+      btnDel.addEventListener('mousedown', (e)=>{ e.stopPropagation(); e.preventDefault(); });
+      btnReset.addEventListener('click', (e)=>{ e.stopPropagation(); e.preventDefault(); resetClip(clip); renderFrame(); });
+      btnDel.addEventListener('click', (e)=>{ e.stopPropagation(); e.preventDefault(); deleteClip(clip.id); renderClips(); renderFrame(); });
+      div.appendChild(btnReset); div.appendChild(btnDel);
+      div.addEventListener('mousedown', (e)=>{ selectClip(clip.id); startDragClip(e, clip, trackW); e.preventDefault(); });
+      hL.addEventListener('mousedown', (e)=>{ selectClip(clip.id); startResizeClip(e, clip, trackW, true); e.stopPropagation(); });
+      hR.addEventListener('mousedown', (e)=>{ selectClip(clip.id); startResizeClip(e, clip, trackW, false); e.stopPropagation(); });
+      track.appendChild(div);
+    });
+    const delBtn = document.getElementById('deleteClipBtn');
+    if (delBtn) delBtn.disabled = !state.activeClipId;
+  }
+  function selectClip(id){
+    state.activeClipId = id;
+    renderClips();
+    // Ensure overlay (red tint) updates immediately even when video is paused
+    renderFrame();
+  }
+  // Also seek to clip start on selection for immediate painting/preview
+  els.clipsTrack?.addEventListener('click', (e)=>{
+    const target = e.target.closest('.clip');
+    if (!target) return;
+    const idx = Array.from(els.clipsTrack.querySelectorAll('.clip')).indexOf(target);
+    if (idx>=0 && state.clips[idx]) {
+      state.activeClipId = state.clips[idx].id;
+      try { els.video.currentTime = state.clips[idx].start; } catch(_) {}
+      renderClips(); renderFrame();
+    }
+  });
+  function startDragClip(e, clip, trackW){
+    const startX = e.clientX; const origL = clip.start; const len = clip.end - clip.start; state.isDraggingTimeline = true;
+    function mm(ev){
+      const dx = ev.clientX - startX; const dt = (dx/trackW)*(state.duration||0);
+      clip.start = Math.max(0, Math.min((state.duration||0)-len, origL+dt));
+      clip.end = clip.start + len;
+      try { els.video.currentTime = clip.start; } catch(_) {}
+      renderClips(); renderFrame();
+    }
+    function up(){ state.isDraggingTimeline=false; window.removeEventListener('mousemove', mm); window.removeEventListener('mouseup', up); }
+    window.addEventListener('mousemove', mm); window.addEventListener('mouseup', up);
+  }
+  function startResizeClip(e, clip, trackW, left){
+    const startX = e.clientX; const orig = left? clip.start : clip.end; state.isDraggingTimeline = true;
+    function mm(ev){
+      const dx = ev.clientX - startX; const dt = (dx/trackW)*(state.duration||0);
+      if (left){
+        clip.start = Math.max(0, Math.min(clip.end-0.1, orig+dt));
+        try { els.video.currentTime = clip.start; } catch(_) {}
+      } else {
+        clip.end = Math.min(state.duration||0, Math.max(clip.start+0.1, orig+dt));
+        try { els.video.currentTime = clip.end; } catch(_) {}
+      }
+      renderClips(); renderFrame();
+    }
+    function up(){ state.isDraggingTimeline=false; window.removeEventListener('mousemove', mm); window.removeEventListener('mouseup', up); }
+    window.addEventListener('mousemove', mm); window.addEventListener('mouseup', up);
+  }
+  function resetClip(clip){
+    if (!clip || !clip.ctx) return;
+    clip.ctx.save();
+    clip.ctx.globalCompositeOperation='source-over';
+    clip.ctx.fillStyle='rgba(0,0,0,1)';
+    clip.ctx.fillRect(0,0,clip.maskCanvas.width, clip.maskCanvas.height);
+    clip.ctx.restore();
+  }
+  function deleteClip(id){
+    const i = state.clips.findIndex(c=>c.id===id);
+    if (i>=0) state.clips.splice(i,1);
+    if (state.activeClipId===id) state.activeClipId = (state.clips[0]?.id)||null;
+  }
+
   function onFile(ev) {
     const f = ev.target.files && ev.target.files[0];
     if (f) loadVideo(f);
@@ -417,6 +760,15 @@
     els.pickColorBtn.disabled = false;
     els.resetBtn.disabled = false;
     els.exportSvgAnimBtn.disabled = false;
+    if (els.playPauseBtn) els.playPauseBtn.disabled = false;
+    if (els.addClipBtn) els.addClipBtn.disabled = false;
+    if (document.getElementById('deleteClipBtn')) document.getElementById('deleteClipBtn').disabled = false;
+    if (els.toolBrushAdd) els.toolBrushAdd.disabled = false;
+    if (els.toolBrushErase) els.toolBrushErase.disabled = false;
+    if (els.toolRect) els.toolRect.disabled = false;
+    state.duration = els.video.duration || 0;
+    if (els.seekbar) { els.seekbar.max = String(state.duration); els.seekbar.value = '0'; }
+    updateTimeUI();
 
     // prepare sample canvas for pixel read
     els.sampleCanvas.width = els.video.videoWidth;
@@ -424,14 +776,10 @@
 
     // start render loop
     if (rvfcSupported) {
-      els.video.pause();
-      const tick = loopRVFC();
-      els.video.requestVideoFrameCallback(tick);
-      // keep video playing muted in background to advance frames during preview
-      els.video.play().catch(()=>{});
+      try { els.video.requestVideoFrameCallback(loopRVFC); } catch(_) {}
+      // 不自动播放，交由用户控制
     } else {
       rafId = requestAnimationFrame(loopRAF);
-      els.video.play().catch(()=>{});
     }
 
     // 自动预取一帧以估算建议键色，保证未拾色前也有预览
@@ -519,6 +867,15 @@
     return { h,s,v };
   }
 
+  // map mouse to canvas pixel coordinates (0..canvas.width/height)
+  function getCanvasPixelPos(e){
+    const rect = els.canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left; const y = e.clientY - rect.top;
+    const cx = Math.max(0, Math.min(els.canvas.width-1, Math.round((x/rect.width)*els.canvas.width)));
+    const cy = Math.max(0, Math.min(els.canvas.height-1, Math.round((y/rect.height)*els.canvas.height)));
+    return { x: cx, y: cy };
+  }
+
   function updatePickPreview(a,bPt,pos){
     const x0 = Math.min(a.x, bPt.x), x1 = Math.max(a.x, bPt.x);
     const y0 = Math.min(a.y, bPt.y), y1 = Math.max(a.y, bPt.y);
@@ -545,7 +902,12 @@
     const x = Math.min(a.x,b.x)*sx, y = Math.min(a.y,b.y)*sy;
     const w = (Math.abs(b.x-a.x)+1)*sx, h = (Math.abs(b.y-a.y)+1)*sy;
     const box = els.pickOverlay.querySelector('.box');
-    if (box){ box.style.left = `${x}px`; box.style.top = `${y}px`; box.style.width = `${w}px`; box.style.height = `${h}px`; }
+    if (box){
+      box.style.left = `${x}px`; box.style.top = `${y}px`; box.style.width = `${w}px`; box.style.height = `${h}px`;
+      // 矩形加与减用不同颜色：加=红，减=蓝
+      if (state.tool==='rect') { box.style.borderColor = '#e53935'; box.style.boxShadow='0 0 0 2px rgba(229,57,53,.25) inset'; }
+      else if (state.tool==='rectErase') { box.style.borderColor='#2196f3'; box.style.boxShadow='0 0 0 2px rgba(33,150,243,.25) inset'; }
+    }
     const sw = els.hoverSwatch;
     if (sw && pos){ sw.style.left = `${pos.x*sx}px`; sw.style.top = `${pos.y*sy}px`; }
   }

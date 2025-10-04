@@ -22,6 +22,7 @@
       <section class="stage">
         <div id="dropZone" class="drop-zone">
           <canvas id="preview" class="preview"></canvas>
+          <canvas id="post" class="post"></canvas>
           <div id="pickOverlay" class="pick-overlay" hidden>
             <div class="box"></div>
             <div class="mini-swatch" id="hoverSwatch"></div>
@@ -29,6 +30,26 @@
           <div class="hint" id="hint">拖拽视频到此处或点击“选择视频”</div>
           <video id="video" crossorigin="anonymous" playsinline muted style="display:none"></video>
           <canvas id="sampleCanvas" width="0" height="0" style="display:none"></canvas>
+        </div>
+        <div class="player-bar">
+          <button id="playPauseBtn" disabled>▶︎</button>
+          <input id="seekbar" type="range" min="0" max="0" step="0.001" value="0" />
+          <span id="timeLabel">00:00 / 00:00</span>
+        </div>
+        <div class="timeline">
+          <div class="timeline-header">
+            <span>排除区域</span>
+            <div class="tools">
+              <button id="addClipBtn" disabled>添加片段</button>
+              <button id="deleteClipBtn" disabled>删除片段</button>
+              <button id="toolBrushAdd" class="tool" disabled>画笔+</button>
+              <button id="toolBrushErase" class="tool" disabled>画笔-</button>
+              <label>笔刷
+                <input id="brushSize" type="range" min="2" max="80" step="1" value="18" />
+              </label>
+            </div>
+          </div>
+          <div id="clipsTrack" class="clips-track"></div>
         </div>
       </section>
 
@@ -46,8 +67,8 @@
           </div>
           <div class="row">
             <label for="softness">柔化</label>
-            <input id="softness" type="range" min="0" max="1" step="0.001" value="1" />
-            <span id="softnessVal" class="val">1.00</span>
+            <input id="softness" type="range" min="0" max="1" step="0.001" value="0" />
+            <span id="softnessVal" class="val">0.00</span>
           </div>
           <div class="row">
             <label for="spill">溢色抑制</label>
