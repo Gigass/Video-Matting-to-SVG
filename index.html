@@ -3,18 +3,22 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>视频色度抠图 · VideoMatting</title>
+    <title>视频抠图转svg</title>
     <link rel="stylesheet" href="src/styles.css" />
   </head>
   <body>
     <header class="app-header">
-      <h1>视频色度抠图</h1>
+      <h1 id="appTitle" data-i18n="appTitle">视频抠图转svg</h1>
       <div class="actions">
         <label class="file-btn">
           <input id="fileInput" type="file" accept="video/*" />
-          选择视频
+          <span data-i18n="chooseVideo">选择视频</span>
         </label>
-        <button id="resetBtn" disabled>重置参数</button>
+        <button id="resetBtn" disabled data-i18n="reset">重置参数</button>
+        <select id="langSelect" aria-label="Language">
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+        </select>
       </div>
     </header>
 
@@ -27,7 +31,7 @@
             <div class="box"></div>
             <div class="mini-swatch" id="hoverSwatch"></div>
           </div>
-          <div class="hint" id="hint">拖拽视频到此处或点击“选择视频”</div>
+          <div class="hint" id="hint" data-i18n="hintDrop">拖拽视频到此处或点击“选择视频”</div>
           <video id="video" crossorigin="anonymous" playsinline muted style="display:none"></video>
           <canvas id="sampleCanvas" width="0" height="0" style="display:none"></canvas>
         </div>
@@ -38,13 +42,13 @@
         </div>
         <div class="timeline">
           <div class="timeline-header">
-            <span>排除区域</span>
+            <span data-i18n="timelineTitle">排除区域</span>
             <div class="tools">
-              <button id="addClipBtn" disabled>添加片段</button>
-              <button id="deleteClipBtn" disabled>删除片段</button>
-              <button id="toolBrushAdd" class="tool" disabled>画笔+</button>
-              <button id="toolBrushErase" class="tool" disabled>画笔-</button>
-              <label>笔刷
+              <button id="addClipBtn" disabled data-i18n="addClip">添加片段</button>
+              <button id="deleteClipBtn" disabled data-i18n="delClip">删除片段</button>
+              <button id="toolBrushAdd" class="tool" disabled data-i18n="brushAdd">画笔+</button>
+              <button id="toolBrushErase" class="tool" disabled data-i18n="brushErase">画笔-</button>
+              <label><span data-i18n="brushLabel">笔刷</span>
                 <input id="brushSize" type="range" min="2" max="80" step="1" value="18" />
               </label>
             </div>
@@ -55,62 +59,62 @@
 
       <aside class="sidebar">
         <div class="panel">
-          <h2>键色与参数</h2>
+          <h2 data-i18n="panelKeyTitle">键色与参数</h2>
           <div class="row">
-            <button id="pickColorBtn" disabled>拾取键色</button>
+            <button id="pickColorBtn" disabled data-i18n="pickColor">拾取键色</button>
             <div class="swatch" id="keySwatch" title="当前键色"></div>
           </div>
           <div class="row">
-            <label for="threshold">阈值</label>
+            <label for="threshold" data-i18n="threshold">阈值</label>
             <input id="threshold" type="range" min="0" max="1" step="0.001" value="1" />
             <span id="thresholdVal" class="val">1.00</span>
           </div>
           <div class="row">
-            <label for="softness">柔化</label>
+            <label for="softness" data-i18n="softness">柔化</label>
             <input id="softness" type="range" min="0" max="1" step="0.001" value="0" />
             <span id="softnessVal" class="val">0.00</span>
           </div>
           <div class="row">
-            <label for="spill">溢色抑制</label>
+            <label for="spill" data-i18n="spill">溢色抑制</label>
             <input id="spill" type="range" min="0" max="1" step="0.001" value="0.3" />
             <span id="spillVal" class="val">0.30</span>
           </div>
           <div class="row">
-            <label for="sharpen">锐化</label>
+            <label for="sharpen" data-i18n="sharpen">锐化</label>
             <input id="sharpen" type="range" min="0" max="1" step="0.01" value="0" />
             <span id="sharpenVal" class="val">0.00</span>
           </div>
           <div class="row">
-            <label for="pixelSlider">像素化</label>
+            <label for="pixelSlider" data-i18n="pixelate">像素化</label>
             <input id="pixelSlider" type="range" min="1" max="64" step="1" value="1" />
             <span id="pixelVal" class="val">1</span>
           </div>
         </div>
 
         <div class="panel">
-          <h2>背景</h2>
-          <div class="row">
+          <h2 data-i18n="bgTitle">背景</h2>
+          <div class="row bg-mode-row">
             <label>
-              <input type="radio" name="bgMode" value="transparent" checked /> 透明
+              <input type="radio" name="bgMode" value="transparent" checked /> <span data-i18n="bgTransparent">透明</span>
             </label>
             <label>
-              <input type="radio" name="bgMode" value="solid" /> 纯色
+              <input type="radio" name="bgMode" value="solid" /> <span data-i18n="bgSolid">纯色</span>
             </label>
             <input id="bgColor" type="color" value="#000000" />
           </div>
         </div>
 
         <div class="panel export-panel">
-          <h2>导出 SVG 动画</h2>
+          <h2 data-i18n="exportTitle">导出 SVG 动画</h2>
           <div class="export-grid">
             <div class="row row-inline">
-              <label for="fpsInput">帧率</label>
+              <label for="fpsInput" data-i18n="fps">帧率</label>
               <input id="fpsInput" type="number" min="1" max="24" step="1" value="8" />
               <span class="help" id="fpsNote">建议 6–12</span>
             </div>
 
             <div class="row row-inline">
-              <label for="scaleSelect">分辨率</label>
+              <label for="scaleSelect" data-i18n="scale">分辨率</label>
               <select id="scaleSelect">
                 <option value="1" selected>100%</option>
                 <option value="0.75">75%</option>
@@ -121,7 +125,7 @@
             </div>
 
             <div class="row row-inline">
-              <label for="frameFormat">帧编码</label>
+              <label for="frameFormat" data-i18n="frameFormat">帧编码</label>
               <select id="frameFormat">
                 <option value="webp" selected>WebP</option>
                 <option value="png">PNG</option>
@@ -130,7 +134,7 @@
             </div>
 
             <div class="row row-inline">
-              <label for="webpQuality">质量</label>
+              <label for="webpQuality" data-i18n="quality">质量</label>
               <div class="field-inline">
                 <input id="webpQuality" type="range" min="0.4" max="0.95" step="0.05" value="0.4" />
                 <span class="val" id="webpQVal">0.40</span>
@@ -139,19 +143,19 @@
             </div>
 
             <div class="row row-inline">
-              <label for="previewBgInput">预览背景图</label>
+              <label for="previewBgInput" data-i18n="previewBg">预览背景图</label>
               <div class="field-inline">
                 <label class="file-btn file-btn-light">
                   <input id="previewBgInput" type="file" accept="image/*" />
-                  选择图像
+                  <span data-i18n="chooseImage">选择图像</span>
                 </label>
-                <button id="clearPreviewBgBtn" type="button" class="btn-ghost">清除</button>
+                <button id="clearPreviewBgBtn" type="button" class="btn-ghost" data-i18n="clear">清除</button>
               </div>
               <span class="help" id="previewBgName"></span>
             </div>
 
             <div class="row row-inline">
-              <label for="includeBgCheck">包含背景</label>
+              <label for="includeBgCheck" data-i18n="includeBg">包含背景</label>
               <label class="toggle">
                 <input id="includeBgCheck" type="checkbox" />
               </label>
@@ -160,10 +164,10 @@
           </div>
 
           <div class="actions-row">
-            <button id="exportSvgAnimBtn" disabled>开始导出 SVG</button>
-            <button id="cancelSvgExportBtn" disabled class="btn-ghost">取消</button>
+            <button id="exportSvgAnimBtn" disabled data-i18n="startExport">开始导出 SVG</button>
+            <button id="cancelSvgExportBtn" disabled class="btn-ghost" data-i18n="cancelExport">取消</button>
           </div>
-          <div class="progress" id="progress" aria-label="导出进度">
+          <div class="progress" id="progress" aria-label="导出进度" data-i18n-aria="progressLabel">
             <div class="bar" id="progressBar"></div>
             <div class="pct" id="progressPct">0%</div>
           </div>
@@ -173,7 +177,7 @@
     </main>
 
     <footer class="app-footer">
-      <div id="status" class="status">准备就绪</div>
+      <div id="status" class="status" data-i18n="statusReady">准备就绪</div>
     </footer>
 
     <script src="src/main.js"></script>

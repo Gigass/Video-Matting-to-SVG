@@ -1,199 +1,289 @@
-# VideoMatting 使用教程（超详细）
+# Video Matting to SVG
 
-> 一款在浏览器中运行的视频色度抠图与 SVG 动画导出工具。无需安装、无需上传，所有处理都在本地进行。
+Chromakey video matting that runs entirely in your browser and exports animated SVG. No installation, no uploads — processing is fully local.
 
-本教程面向完全没有相关背景的用户，从零开始演示如何导入视频、拾取键色、调整抠像效果、管理时间片段、设置背景、并以可循环播放的 SVG 动画形式导出。指南覆盖全部功能与操作细节，保证不遗漏任何功能点。
+## Live Demo
 
+https://video-matting-to-svg-040p3er30m46.gigass.deno.net/
 
-## 1. 我需要准备什么
+## Highlights
 
-- 一台现代浏览器的电脑（推荐 Chrome、Edge、Safari 最新版本）。
-- 可用于测试的视频文件（常见 MP4、WebM、MOV 等只要浏览器能播放即可）。
-- 不需要安装，不需要服务器，直接打开项目里的 `index.html` 即可使用。
-- 设备需要支持 WebGL（绝大多数现代设备都支持）。若不支持，界面会提示，预览将不可用。
+- WebGL‑accelerated chroma key with interactive color picking (click or drag to sample)
+- Fine‑tuning controls: Threshold, Softness, Spill Suppression, Sharpen, Pixelation
+- Per‑clip mask painting to preserve original video regions in selected time ranges
+- Background modes: Transparent or Solid; optional preview background image for the SVG preview area
+- One‑click export to animated SVG with inline preview and direct download
 
+## How It Works
 
-## 2. 如何打开工具
+1. The video is rendered with a GPU shader and keyed against a chosen color.
+2. Optional per‑clip masks are composited to keep regions from being keyed out.
+3. Frames are sampled at the chosen FPS and scale and encoded as WebP (or PNG if WebP is unavailable).
+4. The SVG uses SMIL `<animate>` to toggle frame visibility for a seamless loop.
 
-1) 下载/克隆本仓库到本地。
-2) 用浏览器打开 `index.html` 即可开始使用。
-   - 方式一：双击打开。
-   - 方式二：拖拽 `index.html` 到浏览器窗口。
+All computation happens locally; your media never leaves the browser.
 
-所有处理均在浏览器本地完成，视频不会被上传到网络。
+## Quick Start
 
+1) Open `index.html` in a modern browser (Chrome, Edge, Safari).
+2) Load a video (button “选择视频” or drag & drop onto the stage).
+3) Click “拾取键色” (Pick Key Color) and click/drag on the background region.
+4) Adjust Threshold/Softness/Spill/Sharpen; optionally add clips and paint masks.
+5) In “导出 SVG 动画”, set FPS, Scale, Frame Format (WebP/PNG) and Quality, then export.
 
-## 3. 界面快速认识
+## Basic Workflow (Step‑by‑Step)
 
-打开后，界面主要分为三块：
+1) Import a video
+   - Click “选择视频” (Choose Video) or drag a file onto the stage.
+   - The first frame appears; the status bar shows resolution and duration.
+   - Use the player controls to play/pause or scrub to a frame.
 
-- 顶部工具栏
-  - “选择视频”：点击打开系统文件选择器；也可以把视频文件直接拖拽到中间的大区域。
-  - “重置参数”：恢复抠像相关参数到默认值（不会移除你添加的时间片段）。
+2) Pick a key color (required)
+   - Click “拾取键色” (Pick Key Color).
+   - Method A: single‑click to sample a point color.
+   - Method B: click‑drag a small rectangle to sample the average color (more robust).
+   - Tip: sample a representative background area; avoid the subject.
 
-- 中间舞台与控制区
-  - 舞台（中间大区域）：显示视频与抠像预览。透明区域以“棋盘格”呈现，便于识别透明效果。
-  - 播放控制条：包含“播放/暂停”按钮、进度条（可拖动）、时间标签（当前/总时长）。
-  - 时间轴（“排除区域”）：管理时间片段，用于在某段时间内手动还原原视频的区域（不被抠掉）。
+3) Refine the key
+   - Threshold: expands/reduces the range keyed out; too high may eat into the subject.
+   - Softness: smooths edges to reduce hard cut lines.
+   - Spill Suppression: reduces green/blue fringing on the subject.
+   - Sharpen: subtle sharpening of the result.
+   - Pixelation: for stylized preview; matched during export for consistent look.
 
-- 右侧侧栏（参数与导出）
-  - “键色与参数”：拾取键色以及抠像相关的全部参数（阈值、柔化、溢色抑制、锐化、像素化）。
-  - “背景”：选择“透明”或“纯色”，纯色时可自定义颜色。
-  - “导出 SVG 动画”：设置帧率、分辨率、编码、质量，进度显示、预览与下载。
+4) Improve details with Exclude Regions (optional)
+   - Add Clip: defines a time range to paint a mask for restoring original video.
+   - Move/Resize: drag the clip or its handles in the timeline.
+   - Brush+: paint areas to keep the original video (not keyed out).
+   - Brush−: erase those painted areas to re‑apply the keying.
+   - Reset: clears the mask of the selected clip.
 
+5) Choose background preview (optional)
+   - Transparent: checkerboard indicates transparency; exported SVG keeps alpha.
+   - Solid: composite the result over a chosen color for preview and export.
+   - Preview Background Image: set an image behind the SVG preview area only.
 
-## 4. 基础工作流（一步步上手）
+6) Export animated SVG
+   - Set FPS, Scale, Frame Format (WebP/PNG), and Quality.
+   - Optionally Include Background to embed the preview background in the SVG.
+   - Start export; watch progress; preview and download the generated SVG.
 
-1) 导入视频
-   - 点击顶部“选择视频”，或将视频文件拖拽到中间的舞台区域。
-   - 载入成功后，舞台将显示视频第一帧，底部状态栏会显示视频尺寸与时长。
-   - 可用播放控件进行播放/暂停、拖拽进度条进行定位。
+## Export Settings
 
-2) 选择背景预览模式（可选）
-   - 在右侧“背景”面板：
-     - 选择“透明”：抠掉的部分显示棋盘格（导出 SVG 也将带透明通道）。
-     - 选择“纯色”：在预览与导出时把抠像结果合成为你选定的纯色背景。
+- FPS: 6–12 is typically smooth with reasonable output size.
+- Scale: downscaling accelerates export and reduces file size.
+- Frame Format: WebP (smaller, supports alpha) or PNG (fallback when WebP unsupported).
+- Quality (WebP): 0.6–0.8 is a good balance of size and fidelity.
+- Include Background: embed the preview background (image/solid) into the SVG; otherwise keep transparency.
 
-3) 拾取键色（必须）
-   - 点击“拾取键色”按钮，鼠标进入拾取模式：
-     - 方式一：在画面上“单击”取点颜色。
-     - 方式二：在画面上“拖拽出一个小矩形”，框选区域取平均色（更稳健）。
-   - 松开鼠标后即完成拾取，右侧“键色”色块会显示所选颜色；此时抠像开始生效。
-   - 小技巧：选择靠近背景的代表性区域，避免选到主体颜色。
+Notes
+- Frame count is capped for safety (currently 600). Long videos are truncated at the selected FPS.
+- Exported SVGs loop indefinitely.
 
-4) 调整抠像参数（增强效果）
-   - 阈值：控制与键色相近的像素被抠除的范围。数值越大，抠掉越多；过大可能误伤主体。
-   - 柔化：平滑边缘过渡，减少“硬边”与锯齿。
-   - 溢色抑制：减少主体中的键色残留（例如绿幕反光），建议适量增加观察肤色与边缘。
-   - 锐化：轻量锐化处理，适当提高细节（0~1）。
-   - 像素化：预览的“像素块大小”，用于风格化或性能调试（导出时会做匹配处理使观感一致）。
+## Performance & Compatibility
 
-5) 使用“排除区域”（时间轴）提升细节（可选）
-   - 作用：在片段范围内，手动涂抹需要“保留原视频”的区域，使其不被抠掉。
-   - 添加片段：点击“添加片段”，默认覆盖整段；也可添加多个不同时间片段。
-   - 选择片段：点击时间轴上的片段，选中后会以高亮显示，并自动跳转到该片段开头。
-   - 移动片段：按住片段主体左右拖动，改变起止时间位置。
-   - 调整时长：拖动片段左右两侧的把手改变片段长度。
-   - 删除片段：选中后点击“删除片段”。
-   - 重置片段：点击片段右上角“重置”，清空该片段的排除绘制。
-   - 工具与绘制：
-     - 画笔+：在舞台画面上涂抹要保留原视频的区域（使其“不被抠掉”）。
-     - 画笔-：擦除前述涂抹（恢复抠像效果）。
-     - 笔刷：调节画笔粗细，便于精修边缘。
-   - 建议在暂停时精修，也可在播放中定位后暂停再绘制。
+- Requires WebGL. SMIL animation is supported by modern browsers; test your target environment if you embed the SVG elsewhere.
+- Large/long videos: prefer lower FPS and smaller scale to keep memory and time under control.
+- WebP support is auto‑detected; the app falls back to PNG when needed.
 
-6) 导出 SVG 动画
-   - 参数设置：
-     - 帧率（建议 6–12）：数值越高动画越顺滑，但文件越大、导出越慢。
-     - 分辨率：按原视频比例缩放导出尺寸，右侧会显示“实际导出：宽×高”。
-     - 帧编码：WebP（支持透明）或 PNG（兼容性更高）。
-       - 浏览器不支持 WebP 时会自动回退 PNG。
-     - 质量（仅 WebP 生效）：0.40–0.95，值越大质量越高、体积越大。
-     - 预览背景图：给导出的 SVG 预览放一张底图（仅用于预览/可嵌入），选择/清除，右侧显示已选文件名。
-     - 包含背景：勾选后导出的 SVG 会“内嵌背景”（透明合成在该背景上）。
-   - 开始/取消：
-     - 点击“开始导出 SVG”启动，进度条显示进度，可随时“取消”。
-   - 导出结果：
-     - 生成后页面会出现 SVG 预览与“下载链接”。
-     - 若你在“预览背景图”选择了图片，预览卡片会以该图片为背景；清除后显示棋盘格。
+## Localization
 
+- Full UI available in English and Simplified Chinese.
+- Toggle language from the header; the preference is persisted per browser.
 
-## 5. 透明与背景的说明（很重要）
+## Project Structure
 
-- 舞台预览默认使用“棋盘格”表示透明区域，便于判断抠像是否干净。
-- 右侧“背景”选择：
-  - 透明：导出 SVG 中帧图片保留透明通道，SVG 显示为透明（预览用棋盘格表示）。
-  - 纯色：在预览与导出时合成到纯色背景上，导出的 SVG 里即为“带背景的不透明画面”。
-- 导出面板的“包含背景”与“预览背景图”：
-  - 包含背景：把背景作为 SVG 的一部分一起导出（便于外部直接使用）。
-  - 预览背景图：仅作为预览时的对照底图，也可以与“包含背景”配合使用。
+- `index.html` — Application shell and markup
+- `src/styles.css` — Styles (light theme, cards, timeline, preview background)
+- `src/main.js` — Core logic (WebGL matting, color picking, timeline/masks, SVG export)
 
+## Privacy
 
-## 6. 键色选择小贴士
+Processing is local‑only. No media is uploaded.
 
-- 先点击“拾取键色”进入拾取模式：
-  - 鼠标移动时会预览取色（小色块提示），也可拖拽框选区域取“平均色”。
-- 选纯净的背景色区域，避免包含主体或阴影。框选平均通常比点取更稳健。
-- 抠不干净时：
-  - 适度增加“阈值”和“柔化”。
-  - 使用“溢色抑制”降低背景色反光对主体的影响。
-  - 在“排除区域”片段中用“画笔+”把误抠的主体涂回来。
+## License
 
+MIT — see `LICENSE`.
+# Video Matting to SVG · 视频抠图转 SVG
 
-## 7. 时间轴与“排除区域”详解
+[English](#english) | [简体中文](#简体中文)
 
-- 片段（Clip）：一个时间段内的手动修正层。你可以添加多个片段，分别在不同时间段内绘制不同的排除区域。
-- 红色覆盖提示：选中片段后，对应的排除掩膜会以红色半透明叠加在画面上，方便校对。
-- 规则：
-  - 在片段范围内，排除掩膜为“白”的区域恢复为原视频（不受键控影响）。
-  - 掩膜为“黑”的区域按抠像正常处理。
-- 操作回顾：添加/选择/拖动/缩放/重置/删除片段，配合画笔+/画笔-与笔刷大小。
+## Table of Contents | 目录
 
+- English
+  - [Overview](#en-overview)
+  - [Live Demo](#en-live-demo)
+  - [Highlights](#en-highlights)
+  - [How It Works](#en-how)
+  - [Quick Start](#en-quick-start)
+  - [Basic Workflow (Step‑by‑Step)](#en-workflow)
+  - [Export Settings](#en-export)
+  - [Performance & Compatibility](#en-performance)
+  - [Localization](#en-localization)
+  - [Project Structure](#en-structure)
+  - [Privacy](#en-privacy)
+  - [License](#en-license)
+- 简体中文
+  - [概述](#zh-overview)
+  - [在线预览](#zh-demo)
+  - [主要特性](#zh-highlights)
+  - [工作原理](#zh-how)
+  - [快速开始](#zh-quick-start)
+  - [基础工作流（一步步上手）](#zh-workflow)
+  - [导出设置](#zh-export)
+  - [性能与兼容性](#zh-performance)
+  - [多语言](#zh-localization)
+  - [项目结构](#zh-structure)
+  - [隐私](#zh-privacy)
+  - [许可](#zh-license)
 
-## 8. 导出 SVG 的原理与兼容性
+---
 
-- 导出会按设定帧率逐帧采样，得到若干帧图片（WebP 或 PNG）。
-- SVG 内部使用 SMIL 动画（`<animate>`）在各帧之间切换显示，从而形成循环动画。
-- 兼容性：现代浏览器良好；如需在不支持 SMIL 的环境中使用，请先在目标环境做一次兼容性测试。
-- 透明与背景：若选择“透明”，单帧图像将保留 alpha；若“包含背景”，SVG 内会包含底层背景，整体不透明。
+## English
 
+### Overview <a id="en-overview"></a>
+Chromakey video matting that runs entirely in your browser and exports animated SVG. No installation, no uploads — processing is fully local.
 
-## 9. 性能与体积建议
+### Live Demo <a id="en-live-demo"></a>
+https://video-matting-to-svg-040p3er30m46.gigass.deno.net/
 
-- 帧率：6–12 通常足够流畅且文件较小。
-- 分辨率：降低分辨率（例如 50%）能显著加快导出并减小体积。
-- 编码：WebP 体积更小、支持透明；若目标平台不支持 WebP，可用 PNG。
-- 质量：WebP 质量 0.6–0.8 通常是不错的平衡点。
-- 片段与绘制：仅在需要的时间段内添加排除片段，避免过多掩膜合成影响性能。
+### Highlights <a id="en-highlights"></a>
+- WebGL‑accelerated chroma key with interactive color picking (click or drag to sample)
+- Fine‑tuning controls: Threshold, Softness, Spill Suppression, Sharpen, Pixelation
+- Per‑clip mask painting to preserve original video regions in selected time ranges
+- Background modes: Transparent or Solid; optional preview background image for the SVG preview area
+- One‑click export to animated SVG with inline preview and direct download
 
+### How It Works <a id="en-how"></a>
+1. The video is rendered with a GPU shader and keyed against a chosen color.
+2. Optional per‑clip masks are composited to keep regions from being keyed out.
+3. Frames are sampled at the chosen FPS and scale and encoded as WebP (or PNG if WebP is unavailable).
+4. The SVG uses SMIL `<animate>` to toggle frame visibility for a seamless loop.
 
-## 10. 常见问题（FAQ）
+All computation happens locally; your media never leaves the browser.
 
-- Q1：为什么一开始“键色”是空的？
-  - 为避免误操作，默认没有键色。需要先点击“拾取键色”，点选或框选画面颜色后才会开始抠像。
+### Quick Start <a id="en-quick-start"></a>
+1) Open `index.html` in a modern browser (Chrome, Edge, Safari).
+2) Load a video (button “选择视频” or drag & drop onto the stage).
+3) Click “拾取键色” (Pick Key Color) and click/drag on the background region.
+4) Adjust Threshold/Softness/Spill/Sharpen; optionally add clips and paint masks.
+5) In “导出 SVG 动画”, set FPS, Scale, Frame Format (WebP/PNG) and Quality, then export.
 
-- Q2：透明区域为什么不是黑色？
-  - 为了直观表达，透明以“棋盘格”呈现。导出为“透明”时，生成的 SVG 也会保留透明通道。
+### Basic Workflow (Step‑by‑Step) <a id="en-workflow"></a>
+1) Import a video
+   - Click “选择视频” (Choose Video) or drag a file onto the stage.
+   - The first frame appears; the status bar shows resolution and duration.
+   - Use the player controls to play/pause or scrub to a frame.
+2) Pick a key color (required)
+   - Click “拾取键色” (Pick Key Color).
+   - Method A: single‑click to sample a point color.
+   - Method B: click‑drag a small rectangle to sample the average color (more robust).
+3) Refine the key
+   - Threshold expands/reduces the keyed‑out range; Softness smooths edges; Spill Suppression reduces color spill; Sharpen adds subtle detail; Pixelation stylizes preview (matched during export).
+4) Improve details with Exclude Regions (optional)
+   - Add clips for time ranges, paint with Brush+ to keep original video, Brush− to erase, Reset to clear the clip mask. Drag to move/resize clips in the timeline.
+5) Choose background preview (optional)
+   - Transparent keeps alpha; Solid composites to a chosen color; a preview background image can be applied behind the SVG preview only.
+6) Export animated SVG
+   - Set FPS/Scale/Format/Quality, optionally Include Background, start export, then preview and download.
 
-- Q3：视频快到结尾时会提前停止？
-  - 播放逻辑已做“结束对齐”处理，会显示到完整时长与最后一帧。如仍遇到个别编码的边缘情况，请尝试拖动进度条到末尾或重新导入视频。
+### Export Settings <a id="en-export"></a>
+- FPS: 6–12 is typically smooth with reasonable output size.
+- Scale: downscaling accelerates export and reduces file size.
+- Frame Format: WebP (smaller, supports alpha) or PNG (fallback when WebP unsupported).
+- Quality (WebP): 0.6–0.8 is a good balance of size and fidelity.
+- Include Background: embed the preview background (image/solid) into the SVG; otherwise keep transparency.
 
-- Q4：导出很慢/文件很大怎么办？
-  - 降低“帧率”和“分辨率”，或将“编码”选为 WebP 并适度降低“质量”。
+Notes
+- Frame count is capped for safety (currently 600). Long videos are truncated at the selected FPS.
+- Exported SVGs loop indefinitely.
 
-- Q5：我的浏览器不支持 WebP 怎么办？
-  - 工具会自动回退为 PNG 编码，功能不受影响，只是体积可能更大。
+### Performance & Compatibility <a id="en-performance"></a>
+- Requires WebGL. SMIL animation is supported by modern browsers; test your target environment if you embed the SVG elsewhere.
+- Large/long videos: prefer lower FPS and smaller scale to keep memory and time under control.
+- WebP support is auto‑detected; the app falls back to PNG when needed.
 
-- Q6：选了“预览背景图”为什么看不到文件名？
-  - 导出面板右侧会显示当前选择的文件名；点击“清除”可移除并恢复棋盘格预览。
+### Localization <a id="en-localization"></a>
+- Full UI available in English and Simplified Chinese.
+- Toggle language from the header; the preference is persisted per browser.
 
+### Project Structure <a id="en-structure"></a>
+- `index.html` — Application shell and markup
+- `src/styles.css` — Styles (light theme, cards, timeline, preview background)
+- `src/main.js` — Core logic (WebGL matting, color picking, timeline/masks, SVG export)
 
-## 11. 文件结构（关键文件）
+### Privacy <a id="en-privacy"></a>
+Processing is local‑only. No media is uploaded.
 
-- `index.html`：应用入口与页面结构。
-- `src/styles.css`：全部样式（浅色现代化风格、卡片化、圆角、棋盘格透明显示等）。
-- `src/main.js`：应用逻辑（WebGL 抠像渲染、拾色、时间轴/掩膜绘制、SVG 导出等）。
+### License <a id="en-license"></a>
+MIT — see `LICENSE`.
 
+---
 
-## 12. 隐私与安全
+## 简体中文
 
-- 所有操作均在你的浏览器本地进行，视频与图片不会上传到任何服务器。
-- 若你在公共电脑上操作，完成后建议刷新页面以释放内存与撤销文件选择。
+### 概述 <a id="zh-overview"></a>
+在浏览器中完成视频色度抠图，并导出为可循环播放的 SVG 动画。无需安装、无需上传，所有处理均在本地完成。
 
+### 在线预览 <a id="zh-demo"></a>
+https://video-matting-to-svg-040p3er30m46.gigass.deno.net/
 
-## 13. 键位与辅助操作（目前）
+### 主要特性 <a id="zh-highlights"></a>
+- WebGL 加速抠像，支持点击/框选拾取键色
+- 可调参数：阈值、柔化、溢色抑制、锐化、像素化
+- 按时间片段进行掩膜绘制：保留原视频区域或擦除已保留区域
+- 背景模式：透明/纯色；可为导出预览区域叠加“预览背景图”
+- 一键导出 SVG 动画，内联预览与直接下载
 
-- 暂无全局快捷键。建议通过按钮与滑杆进行操作。
-- 如果你希望增加快捷键（如空格播放/暂停、键盘切换画笔+/− 等），可以提出需求。
+### 工作原理 <a id="zh-how"></a>
+1. 使用 GPU 着色器对视频与选定键色进行抠像。
+2. 可选的“片段掩膜”在时间范围内叠加以保留原视频区域。
+3. 按设定帧率与分辨率采样帧，编码为 WebP（或在不支持时回退 PNG）。
+4. SVG 通过 SMIL `<animate>` 在多帧之间切换，实现无缝循环。
 
+所有计算均在本地浏览器完成，媒体不会被上传。
 
-## 14. 遇到问题怎么办
+### 快速开始 <a id="zh-quick-start"></a>
+1) 用浏览器打开 `index.html`（Chrome/Edge/Safari 等现代浏览器）。
+2) 点击“选择视频”或将视频拖拽到舞台区域。
+3) 点击“拾取键色”，在画面上点击或拖拽框选背景区域。
+4) 视情况调整“阈值/柔化/溢色抑制/锐化/像素化”，可添加片段并绘制掩膜。
+5) 在“导出 SVG 动画”中设置帧率、分辨率、编码与质量，点击导出。
 
-- 请记录你的浏览器版本、系统版本、视频格式与分辨率，并尽量描述复现步骤。
-- 如果导出/预览异常，尝试：
-  - 刷新页面重新导入。
-  - 降低分辨率与帧率。
-  - 更换浏览器或更新到最新版本。
+### 基础工作流（一步步上手） <a id="zh-workflow"></a>
+1) 导入视频：选择或拖拽，状态栏显示分辨率与时长，可播放/定位。
+2) 拾取键色：点击或框选取样，建议选择具有代表性的背景区域。
+3) 调整参数：阈值控制范围，柔化平滑边缘，溢色抑制减少溢色，锐化提升细节，像素化用于风格化预览（导出匹配）。
+4) 片段与掩膜（可选）：添加片段后，用画笔+保留原视频区域，画笔−擦除保留；可拖动/缩放片段并“重置”。
+5) 预览背景（可选）：透明/纯色，可为导出预览叠加单独的背景图。
+6) 导出 SVG：设置参数后导出，查看进度，预览并下载。
 
+### 导出设置 <a id="zh-export"></a>
+- 帧率：6–12 通常足够流畅且体积可控。
+- 分辨率：适当降低可显著加快导出并减小体积。
+- 编码：优先 WebP（体积更小且支持透明），不支持时回退 PNG。
+- 质量（WebP）：0.6–0.8 通常是较好的平衡点。
+- 包含背景：将预览背景（图像/纯色）一同写入 SVG；不勾选则保持透明。
 
-祝你创作愉快！如果你还有希望新增的功能（如：批量导出、更多背景合成模式、快捷键、暗色主题等），欢迎反馈。
+说明
+- 为安全起见限制最大帧数（当前 600 帧），更长的视频会按所选帧率截断。
+- 导出的 SVG 默认循环播放。
+
+### 性能与兼容性 <a id="zh-performance"></a>
+- 需要 WebGL。SMIL 动画在现代浏览器有良好支持；若在目标环境嵌入，请先做兼容性验证。
+- 大分辨率/长视频建议降低帧率与分辨率以控制内存与时间。
+- 会自动检测 WebP 支持，若不支持则回退 PNG。
+
+### 多语言 <a id="zh-localization"></a>
+- 界面支持中文与英文；右上角可切换，浏览器会记住你的选择。
+
+### 项目结构 <a id="zh-structure"></a>
+- `index.html`：应用入口与页面结构
+- `src/styles.css`：样式（浅色主题、卡片、时间轴、预览背景等）
+- `src/main.js`：核心逻辑（WebGL 抠像、拾色、时间轴/掩膜、SVG 导出）
+
+### 隐私 <a id="zh-privacy"></a>
+所有处理均在本地完成，媒体文件不会被上传。
+
+### 许可 <a id="zh-license"></a>
+MIT，详见 `LICENSE`。

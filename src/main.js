@@ -1,4 +1,139 @@
 (() => {
+  // --- i18n ---
+  const i18n = {
+    zh: {
+      appTitle: '视频抠图转svg',
+      chooseVideo: '选择视频',
+      reset: '重置参数',
+      hintDrop: '拖拽视频到此处或点击“选择视频”',
+      timelineTitle: '排除区域',
+      addClip: '添加片段',
+      delClip: '删除片段',
+      brushAdd: '画笔+',
+      brushErase: '画笔-',
+      brushLabel: '笔刷',
+      panelKeyTitle: '键色与参数',
+      pickColor: '拾取键色',
+      threshold: '阈值',
+      softness: '柔化',
+      spill: '溢色抑制',
+      sharpen: '锐化',
+      pixelate: '像素化',
+      bgTitle: '背景',
+      bgTransparent: '透明',
+      bgSolid: '纯色',
+      exportTitle: '导出 SVG 动画',
+      fps: '帧率',
+      scale: '分辨率',
+      frameFormat: '帧编码',
+      quality: '质量',
+      previewBg: '预览背景图',
+      chooseImage: '选择图像',
+      clear: '清除',
+      includeBg: '包含背景',
+      startExport: '开始导出 SVG',
+      cancelExport: '取消',
+      progressLabel: '导出进度',
+      downloadSvg: '下载 SVG 动画',
+      statusReady: '准备就绪',
+      statusReady: '准备就绪',
+      noWebGL: '当前浏览器不支持 WebGL，预览可能不可用',
+      pickHint: '点击或拖拽选择区域以取样键色',
+      videoLoadError: '视频加载失败',
+      loadedInfo: '已加载 {w}×{h}, 时长 {s}s',
+      keySet: '已设置键色 rgb({r}, {g}, {b})',
+      noDuration: '无法获取视频时长',
+      exporting: '正在生成 SVG 动画...',
+      tooManyFrames: '帧数较多，限制导出至 {N} 帧（{fps}fps 上限 {max}）',
+      exportCanceled: '已取消导出',
+      exportDone: 'SVG 生成完成并预览，帧数 {N}，时长 {s}s',
+      svgPreviewAlt: 'SVG 预览',
+      actualExport: '实际导出：{w}×{h}',
+      clipLabel: '片段',
+      btnResetLabel: '重置',
+    },
+    en: {
+      appTitle: 'Video Matting to SVG',
+      chooseVideo: 'Choose Video',
+      reset: 'Reset',
+      hintDrop: 'Drop a video here or click “Choose Video”',
+      timelineTitle: 'Exclude Regions',
+      addClip: 'Add Clip',
+      delClip: 'Delete Clip',
+      brushAdd: 'Brush+',
+      brushErase: 'Brush−',
+      brushLabel: 'Brush',
+      panelKeyTitle: 'Key & Parameters',
+      pickColor: 'Pick Key Color',
+      threshold: 'Threshold',
+      softness: 'Softness',
+      spill: 'Spill Suppression',
+      sharpen: 'Sharpen',
+      pixelate: 'Pixelation',
+      bgTitle: 'Background',
+      bgTransparent: 'Transparent',
+      bgSolid: 'Solid',
+      exportTitle: 'Export SVG Animation',
+      fps: 'FPS',
+      scale: 'Scale',
+      frameFormat: 'Frame Format',
+      quality: 'Quality',
+      previewBg: 'Preview Background',
+      chooseImage: 'Choose Image',
+      clear: 'Clear',
+      includeBg: 'Include Background',
+      startExport: 'Start Export',
+      cancelExport: 'Cancel',
+      progressLabel: 'Export Progress',
+      downloadSvg: 'Download SVG',
+      statusReady: 'Ready',
+      noWebGL: 'WebGL is not supported; preview may not work',
+      pickHint: 'Click or drag a region to pick key color',
+      videoLoadError: 'Video failed to load',
+      loadedInfo: 'Loaded {w}×{h}, duration {s}s',
+      keySet: 'Key color set to rgb({r}, {g}, {b})',
+      noDuration: 'Cannot get video duration',
+      exporting: 'Generating SVG animation...',
+      tooManyFrames: 'Too many frames; limited to {N} (fps {fps}, max {max})',
+      exportCanceled: 'Export canceled',
+      exportDone: 'SVG generated, frames {N}, duration {s}s',
+      svgPreviewAlt: 'SVG Preview',
+      actualExport: 'Actual export: {w}×{h}',
+      clipLabel: 'Clip',
+      btnResetLabel: 'Reset',
+    }
+  };
+
+  let currentLang = 'zh';
+  function getLang() {
+    const saved = localStorage.getItem('lang');
+    if (saved === 'en' || saved === 'zh') return saved;
+    return (navigator.language || 'zh').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+  }
+  function t(key, vars){
+    const dict = i18n[currentLang] || i18n.zh;
+    let s = (dict[key] ?? i18n.zh[key] ?? key) + '';
+    if (vars) s = s.replace(/\{(\w+)\}/g, (_,k)=> (vars[k]!==undefined? String(vars[k]) : `{${k}}`));
+    return s;
+  }
+  function applyI18n(lang) {
+    const dict = i18n[lang] || i18n.zh;
+    currentLang = lang;
+    document.documentElement.lang = lang;
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+      const k = el.getAttribute('data-i18n');
+      if (k && dict[k]) el.textContent = dict[k];
+    });
+    document.querySelectorAll('[data-i18n-aria]').forEach(el => {
+      const k = el.getAttribute('data-i18n-aria');
+      if (k && dict[k]) el.setAttribute('aria-label', dict[k]);
+    });
+    if (dict.appTitle) document.title = dict.appTitle;
+    const sel = document.getElementById('langSelect');
+    if (sel) sel.value = lang;
+    const st = document.getElementById('status');
+    if (st && st.getAttribute('data-i18n') === 'statusReady') st.textContent = dict.statusReady;
+  }
   const els = {
     fileInput: document.getElementById('fileInput'),
     dropZone: document.getElementById('dropZone'),
@@ -80,10 +215,25 @@
 
   const bgModeInputs = Array.from(document.querySelectorAll('input[name="bgMode"]'));
 
+  // init i18n early
+  const initLang = getLang();
+  applyI18n(initLang);
+  const langSelect = document.getElementById('langSelect');
+  if (langSelect) {
+    langSelect.addEventListener('change', () => {
+      const l = langSelect.value === 'en' ? 'en' : 'zh';
+      localStorage.setItem('lang', l);
+      applyI18n(l);
+      try { renderClips(); } catch(_) {}
+      try { updateScaleInfo(); } catch(_) {}
+      try { updateFmtSupport(); } catch(_) {}
+    });
+  }
+
   // WebGL setup
   const gl = els.canvas.getContext('webgl', { premultipliedAlpha: false, preserveDrawingBuffer: true });
   if (!gl) {
-    setStatus('当前浏览器不支持 WebGL，预览可能不可用');
+    setStatus(t('noWebGL'));
     return;
   }
 
@@ -511,7 +661,7 @@ function loopRVFC(now, metadata) {
     state.picking = !state.picking;
     els.pickColorBtn.classList.toggle('active', state.picking);
     els.canvas.classList.toggle('picking', state.picking);
-    setStatus(state.picking ? '点击或拖拽选择区域以取样键色' : '准备就绪');
+    setStatus(state.picking ? t('pickHint') : t('statusReady'));
   });
 
   // Color pick (click or drag rectangle to average)
@@ -691,11 +841,11 @@ function loopRVFC(now, metadata) {
       const div = document.createElement('div'); div.className = 'clip'+(clip.id===state.activeClipId?' selected':'');
       const l = (clip.start/(state.duration||1))*trackW; const w = Math.max(6, ((clip.end-clip.start)/(state.duration||1))*trackW);
       div.style.left = `${l}px`; div.style.width = `${w}px`; div.style.top = `${8 + idx*rowH}px`;
-      const label = document.createElement('span'); label.className='clip-label'; label.textContent = `片段${idx+1}`;
+      const label = document.createElement('span'); label.className='clip-label'; label.textContent = `${t('clipLabel')} ${idx+1}`;
       const hL = document.createElement('div'); hL.className='handle left';
       const hR = document.createElement('div'); hR.className='handle right';
       div.appendChild(label); div.appendChild(hL); div.appendChild(hR);
-      const btnReset = document.createElement('button'); btnReset.className='clip-btn reset'; btnReset.textContent='重置';
+      const btnReset = document.createElement('button'); btnReset.className='clip-btn reset'; btnReset.textContent = t('btnResetLabel');
       const btnDel = document.createElement('button'); btnDel.className='clip-btn del'; btnDel.textContent='✕';
       btnReset.addEventListener('mousedown', (e)=>{ e.stopPropagation(); e.preventDefault(); });
       btnDel.addEventListener('mousedown', (e)=>{ e.stopPropagation(); e.preventDefault(); });
@@ -781,14 +931,14 @@ function loopRVFC(now, metadata) {
     els.video.src = url;
     els.video.load();
     els.video.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
-    els.video.addEventListener('error', () => setStatus('视频加载失败'), { once: true });
+    els.video.addEventListener('error', () => setStatus(t('videoLoadError')), { once: true });
   }
 
   function onLoadedMetadata() {
     state.hasVideo = true;
     els.hint.style.display = 'none';
     fitCanvasToVideo();
-    setStatus(`已加载 ${els.video.videoWidth}×${els.video.videoHeight}, 时长 ${(els.video.duration||0).toFixed(2)}s`);
+    setStatus(t('loadedInfo', { w: els.video.videoWidth|0, h: els.video.videoHeight|0, s: (els.video.duration||0).toFixed(2) }));
     els.pickColorBtn.disabled = false;
     els.resetBtn.disabled = false;
     els.exportSvgAnimBtn.disabled = false;
@@ -850,7 +1000,7 @@ function loopRVFC(now, metadata) {
     // convert sRGB avg to linear for shader
     state.keyColor = [srgbToLinear01(r), srgbToLinear01(g), srgbToLinear01(b)];
     setKeySwatch([r,g,b]);
-    setStatus(`已设置键色 rgb(${(r*255)|0}, ${(g*255)|0}, ${(b*255)|0})`);
+    setStatus(t('keySet', { r: (r*255)|0, g: (g*255)|0, b: (b*255)|0 }));
   }
 
   // 尝试自动检测一个“较显眼”的键色：在缩小网格中寻找高饱和度像素
@@ -950,7 +1100,7 @@ function loopRVFC(now, metadata) {
     if (!state.hasVideo || state.exporting) return;
     const fps = Math.max(1, Math.min(24, parseInt(els.fpsInput?.value || '8', 10) || 8));
     const duration = Math.max(0, els.video.duration || 0);
-    if (!duration) { setStatus('无法获取视频时长'); return; }
+    if (!duration) { setStatus(t('noDuration')); return; }
 
     state.exporting = true;
     state.cancelExport = false;
@@ -958,7 +1108,7 @@ function loopRVFC(now, metadata) {
     els.cancelSvgExportBtn.disabled = false;
     els.pickColorBtn.disabled = true;
     els.exportResult.innerHTML = '';
-    setStatus('正在生成 SVG 动画...');
+    setStatus(t('exporting'));
     updateProgress(0);
 
     const wasPlaying = !els.video.paused;
@@ -980,7 +1130,7 @@ function loopRVFC(now, metadata) {
     const totalFrames = Math.max(1, Math.floor(duration * fps));
     const maxFrames = 600; // 安全上限
     const N = Math.min(totalFrames, maxFrames);
-    if (N < totalFrames) setStatus(`帧数较多，限制导出至 ${N} 帧（${fps}fps 上限 ${maxFrames}）`);
+    if (N < totalFrames) setStatus(t('tooManyFrames', { N, fps, max: maxFrames }));
 
     const images = [];
     // 输出尺寸（按缩放）
@@ -1025,7 +1175,7 @@ function loopRVFC(now, metadata) {
     pixelOverride = null;
     state.bgMode = prevBgMode;
 
-    if (state.cancelExport) { finishSvgExport(true); setStatus('已取消导出'); if (wasPlaying) els.video.play().catch(()=>{}); return; }
+    if (state.cancelExport) { finishSvgExport(true); setStatus(t('exportCanceled')); if (wasPlaying) els.video.play().catch(()=>{}); return; }
 
     const totalDur = N / fps;
     const header = `<?xml version="1.0" encoding="UTF-8"?>\n` +
@@ -1054,9 +1204,9 @@ function loopRVFC(now, metadata) {
     const url = URL.createObjectURL(blob);
     // 直接预览 + 下载链接
     const a = document.createElement('a');
-    a.href = url; a.download = 'chroma-keyed.svg'; a.textContent = '下载 SVG 动画';
+    a.href = url; a.download = 'chroma-keyed.svg'; a.textContent = t('downloadSvg');
     const img = document.createElement('img');
-    img.src = url; img.alt = 'SVG 预览';
+    img.src = url; img.alt = t('svgPreviewAlt');
     const wrap = document.createElement('div');
     wrap.className = 'svg-preview';
     wrap.appendChild(img);
@@ -1064,7 +1214,7 @@ function loopRVFC(now, metadata) {
     els.exportResult.appendChild(wrap);
     applyPreviewBg();
     els.exportResult.appendChild(a);
-    setStatus(`SVG 生成完成并预览，帧数 ${N}，时长 ${totalDur.toFixed(2)}s`);
+    setStatus(t('exportDone', { N, s: totalDur.toFixed(2) }));
     finishSvgExport();
     if (wasPlaying) els.video.play().catch(()=>{});
     setTimeout(()=>URL.revokeObjectURL(url), 30000);
@@ -1114,7 +1264,7 @@ function loopRVFC(now, metadata) {
   function updateFmtSupport() {
     if (!els.fmtSupport) return;
     const ok = state.frameFormat === 'webp' ? supportsWebP() : true;
-    els.fmtSupport.textContent = ok ? '' : '此浏览器不支持 WebP，已回退 PNG';
+    els.fmtSupport.textContent = ok ? '' : (currentLang==='zh' ? '此浏览器不支持 WebP，已回退 PNG' : 'WebP not supported; fell back to PNG');
   }
 
   function updateScaleInfo() {
@@ -1124,7 +1274,7 @@ function loopRVFC(now, metadata) {
     if (!state.hasVideo || !vw || !vh) { els.scaleInfo.textContent = ''; return; }
     const outW = Math.max(1, Math.round(vw * s));
     const outH = Math.max(1, Math.round(vh * s));
-    els.scaleInfo.textContent = `实际导出：${outW}×${outH}`;
+    els.scaleInfo.textContent = t('actualExport', { w: outW, h: outH });
   }
 
   function updateWebPUI() {
