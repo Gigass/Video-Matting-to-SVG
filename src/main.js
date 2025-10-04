@@ -50,7 +50,7 @@
   const state = {
     hasVideo: false,
     picking: false,
-    keyColor: [0.0, 1.0, 0.0], // default green in linear-ish space
+    keyColor: null, // no default key color until user picks
     threshold: parseFloat(els.threshold.value),
     softness: parseFloat(els.softness.value),
     spill: parseFloat(els.spill.value),
@@ -109,6 +109,7 @@
     uniform float u_sharpen;    // 0..1 amount
     uniform sampler2D u_mask;   // exclusion mask (0..1), 1 means use original video
     uniform int u_hasMask;
+    uniform int u_hasKey;       // 0 no keying, 1 apply keying
 
     // simple linearization for sRGB
     vec3 toLinear(vec3 c) {
@@ -133,17 +134,19 @@
       vec3 blur = (col*4.0 + nb1 + nb2 + nb3 + nb4) / 8.0;
       vec3 colSharpen = clamp(col + (col - blur) * (1.5 * u_sharpen), 0.0, 1.0);
       col = mix(col, colSharpen, u_sharpen);
-      // distance in RGB linear space
-      float d = distance(col, u_key);
-      // alpha via smoothstep: near key color -> 0 alpha
-      float alpha = smoothstep(u_thresh - u_soft, u_thresh + u_soft, d);
+      // compute alpha only when key is present
+      float alpha = 1.0;
+      if (u_hasKey == 1) {
+        float d = distance(col, u_key);
+        alpha = smoothstep(u_thresh - u_soft, u_thresh + u_soft, d);
+      }
 
       // spill suppression: reduce contribution of key color channel
       // compute per-channel towards neutral based on key dominance
       vec3 kN = normalize(u_key + 1e-6);
       float kDominance = max(max(kN.r, kN.g), kN.b);
       vec3 spillFixed = col;
-      if (kDominance > 0.0) {
+      if (kDominance > 0.0 && u_hasKey == 1) {
         // project color onto key direction
         float proj = dot(col, normalize(u_key));
         vec3 keyComp = proj * normalize(u_key);
@@ -188,6 +191,7 @@
     u_sharpen: gl.getUniformLocation(program, 'u_sharpen'),
     u_mask: gl.getUniformLocation(program, 'u_mask'),
     u_hasMask: gl.getUniformLocation(program, 'u_hasMask'),
+    u_hasKey: gl.getUniformLocation(program, 'u_hasKey'),
   };
 
   // fullscreen quad
@@ -226,11 +230,21 @@
 
   function setStatus(msg) { els.status.textContent = msg; }
   function setKeySwatch(rgb) {
+    if (!els.keySwatch) return;
+    if (!rgb) {
+      els.keySwatch.style.background = 'transparent';
+      els.keySwatch.setAttribute('data-empty', 'true');
+      return;
+    }
     const [r,g,b] = rgb.map(x => Math.max(0, Math.min(255, Math.round(x*255))));
     els.keySwatch.style.background = `rgb(${r}, ${g}, ${b})`;
+    els.keySwatch.removeAttribute('data-empty');
   }
   function srgbToLinear01(c) { return Math.pow(c, 2.2); }
   function linearToSrgb01(c) { return Math.pow(c, 1/2.2); }
+
+  // Initialize swatch as empty (no key selected)
+  try { setKeySwatch(null); } catch(_) {}
 
   function fitCanvasToVideo() {
     const vw = els.video.videoWidth || 1280;
@@ -281,8 +295,10 @@
     }
 
     gl.uniform1i(uniforms.u_tex, 0);
-    const key = (state.picking && state.previewKeyColor) ? state.previewKeyColor : state.keyColor;
+    const hasKey = (state.picking && state.previewKeyColor) || Array.isArray(state.keyColor);
+    const key = (state.picking && state.previewKeyColor) ? state.previewKeyColor : (state.keyColor || [0,0,0]);
     gl.uniform3fv(uniforms.u_key, new Float32Array(key));
+    gl.uniform1i(uniforms.u_hasKey, hasKey ? 1 : 0);
     gl.uniform1f(uniforms.u_thresh, state.threshold);
     gl.uniform1f(uniforms.u_soft, Math.max(0.0001, state.softness));
     gl.uniform1f(uniforms.u_spill, state.spill);
@@ -553,7 +569,7 @@ function loopRVFC(now, metadata) {
   els.canvas.addEventListener('mouseleave', ()=>{ state.isPainting = false; });
 
   els.resetBtn.addEventListener('click', () => {
-    state.keyColor = [0.0, 1.0, 0.0]; setKeySwatch(state.keyColor.map(linearToSrgb01));
+    state.keyColor = null; setKeySwatch(null);
     els.threshold.value = '1'; els.threshold.dispatchEvent(new Event('input'));
     els.softness.value = '1'; els.softness.dispatchEvent(new Event('input'));
     els.spill.value = '0.3'; els.spill.dispatchEvent(new Event('input'));
@@ -610,12 +626,22 @@ function loopRVFC(now, metadata) {
   }
   els.video.addEventListener('play', ()=>{ state.isPlaying = true; if (els.playPauseBtn) els.playPauseBtn.textContent='⏸'; });
   els.video.addEventListener('pause', ()=>{ state.isPlaying = false; if (els.playPauseBtn) els.playPauseBtn.textContent='▶︎'; });
+  // Ensure reaching exact end shows full duration and last frame
+  els.video.addEventListener('ended', () => {
+    try { els.video.currentTime = Math.max(0, els.video.duration || 0); } catch(_) {}
+    state.isPlaying = false;
+    if (els.playPauseBtn) els.playPauseBtn.textContent='▶︎';
+    updateTimeUI();
+    renderFrame();
+  });
 
   function updateTimeUI(){
     if (!state.hasVideo || !els.seekbar) return;
-    els.seekbar.max = String(state.duration||0);
-    els.seekbar.value = String(els.video.currentTime||0);
-    if (els.timeLabel) els.timeLabel.textContent = `${fmtTime(els.video.currentTime||0)} / ${fmtTime(state.duration||0)}`;
+    const dur = state.duration||0;
+    const cur = els.video.ended ? dur : Math.min(dur, els.video.currentTime||0);
+    els.seekbar.max = String(dur);
+    els.seekbar.value = String(cur);
+    if (els.timeLabel) els.timeLabel.textContent = `${fmtTime(cur)} / ${fmtTime(dur)}`;
   }
   function fmtTime(s){ const m = Math.floor(s/60)|0; const ss = s - m*60; return `${String(m).padStart(2,'0')}:${ss.toFixed(2).padStart(5,'0')}`; }
 
@@ -782,8 +808,7 @@ function loopRVFC(now, metadata) {
       rafId = requestAnimationFrame(loopRAF);
     }
 
-    // 自动预取一帧以估算建议键色，保证未拾色前也有预览
-    setTimeout(()=>{ try { autoDetectKeyColor(); renderFrame(); } catch(_){} }, 120);
+    // 不自动估算键色，保持“未选择键色”状态，等待用户拾取
   }
 
   function stopLoops() {
