@@ -13,6 +13,7 @@ https://video-matting-to-svg.gigass.deno.net/
 - Per‑clip mask painting to preserve original video regions in selected time ranges
 - Background modes: Transparent or Solid; optional preview background image for the SVG preview area
 - One‑click export to animated SVG with inline preview and direct download
+- New: PNG Spritesheet export
 
 ## How It Works
 
@@ -63,10 +64,9 @@ All computation happens locally; your media never leaves the browser.
    - Solid: composite the result over a chosen color for preview and export.
    - Preview Background Image: set an image behind the SVG preview area only.
 
-6) Export animated SVG
-   - Set FPS, Scale, Frame Format (WebP/PNG), and Quality.
-   - Optionally Include Background to embed the preview background in the SVG.
-   - Start export; watch progress; preview and download the generated SVG.
+6) Export animated SVG or PNG Spritesheet
+   - Set FPS and Scale. SVG: choose Frame Format/Quality. Spritesheet: PNG only.
+   - Start export; watch progress; preview and download the result.
 
 ## Export Settings
 
@@ -234,6 +234,7 @@ https://video-matting-to-svg.gigass.deno.net/
 - 按时间片段进行掩膜绘制：保留原视频区域或擦除已保留区域
 - 背景模式：透明/纯色；可为导出预览区域叠加“预览背景图”
 - 一键导出 SVG 动画，内联预览与直接下载
+- 新增 PNG Spritesheet 导出
 
 ### 工作原理 <a id="zh-how"></a>
 1. 使用 GPU 着色器对视频与选定键色进行抠像。
@@ -256,7 +257,7 @@ https://video-matting-to-svg.gigass.deno.net/
 3) 调整参数：阈值控制范围，柔化平滑边缘，溢色抑制减少溢色，锐化提升细节，像素化用于风格化预览（导出匹配）。
 4) 片段与掩膜（可选）：添加片段后，用画笔+保留原视频区域，画笔−擦除保留；可拖动/缩放片段并“重置”。
 5) 预览背景（可选）：透明/纯色，可为导出预览叠加单独的背景图。
-6) 导出 SVG：设置参数后导出，查看进度，预览并下载。
+6) 导出：可选择导出 SVG 动画或 PNG Spritesheet。SVG 可选编码与质量；Spritesheet 仅导出 PNG。
 
 ### 导出设置 <a id="zh-export"></a>
 - 帧率：6–12 通常足够流畅且体积可控。

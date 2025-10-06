@@ -23,6 +23,7 @@
       bgTransparent: '透明',
       bgSolid: '纯色',
       exportTitle: '导出 SVG 动画',
+      exportSpritesheet: '导出 Spritesheet',
       fps: '帧率',
       scale: '分辨率',
       frameFormat: '帧编码',
@@ -45,9 +46,12 @@
       keySet: '已设置键色 rgb({r}, {g}, {b})',
       noDuration: '无法获取视频时长',
       exporting: '正在生成 SVG 动画...',
+      exportingSheet: '正在生成 Spritesheet（PNG）...',
       tooManyFrames: '帧数较多，限制导出至 {N} 帧（{fps}fps 上限 {max}）',
       exportCanceled: '已取消导出',
       exportDone: 'SVG 生成完成并预览，帧数 {N}，时长 {s}s',
+      sheetExportDone: 'Spritesheet 生成完成，帧数 {N}，尺寸 {w}×{h}',
+      downloadSheet: '下载 PNG Spritesheet',
       svgPreviewAlt: 'SVG 预览',
       actualExport: '实际导出：{w}×{h}',
       clipLabel: '片段',
@@ -75,6 +79,7 @@
       bgTransparent: 'Transparent',
       bgSolid: 'Solid',
       exportTitle: 'Export SVG Animation',
+      exportSpritesheet: 'Export Spritesheet',
       fps: 'FPS',
       scale: 'Scale',
       frameFormat: 'Frame Format',
@@ -96,9 +101,12 @@
       keySet: 'Key color set to rgb({r}, {g}, {b})',
       noDuration: 'Cannot get video duration',
       exporting: 'Generating SVG animation...',
+      exportingSheet: 'Generating Spritesheet (PNG)...',
       tooManyFrames: 'Too many frames; limited to {N} (fps {fps}, max {max})',
       exportCanceled: 'Export canceled',
       exportDone: 'SVG generated, frames {N}, duration {s}s',
+      sheetExportDone: 'Spritesheet generated, frames {N}, size {w}×{h}',
+      downloadSheet: 'Download PNG Spritesheet',
       svgPreviewAlt: 'SVG Preview',
       actualExport: 'Actual export: {w}×{h}',
       clipLabel: 'Clip',
@@ -160,6 +168,7 @@
     bgColor: document.getElementById('bgColor'),
     resetBtn: document.getElementById('resetBtn'),
     exportSvgAnimBtn: document.getElementById('exportSvgAnimBtn'),
+    exportSpritesheetBtn: document.getElementById('exportSpritesheetBtn'),
     cancelSvgExportBtn: document.getElementById('cancelSvgExportBtn'),
     fpsInput: document.getElementById('fpsInput'),
     scaleSelect: document.getElementById('scaleSelect'),
@@ -733,6 +742,7 @@ function loopRVFC(now, metadata) {
   });
 
   els.exportSvgAnimBtn.addEventListener('click', startExportSvgAnimation);
+  if (els.exportSpritesheetBtn) els.exportSpritesheetBtn.addEventListener('click', startExportSpritesheet);
   els.cancelSvgExportBtn.addEventListener('click', cancelExportSvg);
   if (els.scaleSelect) els.scaleSelect.addEventListener('change', ()=>{ state.scale = Math.max(0.1, Math.min(1, parseFloat(els.scaleSelect.value)||0.5)); });
   // 更新分辨率实际像素显示
@@ -944,6 +954,7 @@ function loopRVFC(now, metadata) {
     els.pickColorBtn.disabled = false;
     els.resetBtn.disabled = false;
     els.exportSvgAnimBtn.disabled = false;
+    if (els.exportSpritesheetBtn) els.exportSpritesheetBtn.disabled = false;
     if (els.playPauseBtn) els.playPauseBtn.disabled = false;
     if (els.addClipBtn) els.addClipBtn.disabled = false;
     if (document.getElementById('deleteClipBtn')) document.getElementById('deleteClipBtn').disabled = false;
@@ -1228,8 +1239,145 @@ function loopRVFC(now, metadata) {
     state.exporting = false;
     els.cancelSvgExportBtn.disabled = true;
     els.exportSvgAnimBtn.disabled = !state.hasVideo;
+    if (els.exportSpritesheetBtn) els.exportSpritesheetBtn.disabled = !state.hasVideo;
     els.pickColorBtn.disabled = !state.hasVideo;
     if (canceled) updateProgress(0);
+  }
+
+  // 导出 PNG Spritesheet（单一 PNG 下载项）
+  async function startExportSpritesheet() {
+    if (!state.hasVideo || state.exporting) return;
+    const fps = Math.max(1, Math.min(24, parseInt(els.fpsInput?.value || '8', 10) || 8));
+    const duration = Math.max(0, els.video.duration || 0);
+    if (!duration) { setStatus(t('noDuration')); return; }
+
+    state.exporting = true;
+    state.cancelExport = false;
+    els.exportSvgAnimBtn.disabled = true;
+    if (els.exportSpritesheetBtn) els.exportSpritesheetBtn.disabled = true;
+    els.cancelSvgExportBtn.disabled = false;
+    els.pickColorBtn.disabled = true;
+    els.exportResult.innerHTML = '';
+    setStatus(t('exportingSheet'));
+    updateProgress(0);
+
+    const wasPlaying = !els.video.paused;
+    try { els.video.pause(); } catch(_) {}
+
+    // 提升到源分辨率渲染
+    const prevCssW = els.canvas.style.width;
+    const prevCssH = els.canvas.style.height;
+    const prevW = els.canvas.width, prevH = els.canvas.height;
+    const srcW = els.video.videoWidth|0, srcH = els.video.videoHeight|0;
+    els.canvas.style.width = `${srcW}px`;
+    els.canvas.style.height = `${srcH}px`;
+    els.canvas.width = srcW; els.canvas.height = srcH;
+    gl.viewport(0, 0, srcW, srcH);
+
+    // 帧数限制（与 SVG 导出一致的保护）
+    const totalFrames = Math.max(1, Math.floor(duration * fps));
+    const maxFrames = 600;
+    const N = Math.min(totalFrames, maxFrames);
+    if (N < totalFrames) setStatus(t('tooManyFrames', { N, fps, max: maxFrames }));
+
+    // 输出尺寸（按缩放）
+    const scale = Math.max(0.1, Math.min(1, state.scale || parseFloat(els.scaleSelect?.value || '1') || 1));
+    const outW = Math.max(1, Math.round(srcW * scale));
+    const outH = Math.max(1, Math.round(srcH * scale));
+
+    // 网格布局（默认接近正方形）
+    let cols = Math.max(1, Math.ceil(Math.sqrt(N)));
+    let rows = Math.max(1, Math.ceil(N / cols));
+    const glMax = (function(){ try { return gl.getParameter(gl.MAX_TEXTURE_SIZE) || 8192; } catch(_) { return 8192; } })();
+    const maxSize = Math.min(glMax, 8192);
+    let sheetW = cols * outW;
+    let sheetH = rows * outH;
+    while ((sheetW > maxSize || sheetH > maxSize) && cols > 1) {
+      cols -= 1;
+      rows = Math.ceil(N / cols);
+      sheetW = cols * outW; sheetH = rows * outH;
+    }
+    if (sheetW > maxSize || sheetH > maxSize) {
+      // 仍超限，提示用户调小参数
+      setStatus((currentLang==='zh')
+        ? `目标尺寸过大（${sheetW}×${sheetH}），请降低帧率或分辨率`
+        : `Spritesheet too large (${sheetW}×${sheetH}); reduce FPS or Scale`);
+      finishSvgExport(true);
+      // 还原尺寸
+      els.canvas.style.width = prevCssW; els.canvas.style.height = prevCssH;
+      els.canvas.width = prevW; els.canvas.height = prevH; gl.viewport(0,0,prevW,prevH);
+      if (wasPlaying) els.video.play().catch(()=>{});
+      return;
+    }
+
+    // 逐帧绘制到 sheet
+    const sheet = document.createElement('canvas');
+    sheet.width = sheetW; sheet.height = sheetH;
+    const sctx = sheet.getContext('2d');
+    sctx.imageSmoothingEnabled = false;
+    const tile = document.createElement('canvas');
+    tile.width = outW; tile.height = outH;
+    const tctx = tile.getContext('2d');
+    tctx.imageSmoothingEnabled = false;
+
+    const seekTo = (t) => new Promise((res, rej) => {
+      const onSeeked = () => { els.video.removeEventListener('seeked', onSeeked); res(); };
+      els.video.addEventListener('seeked', onSeeked, { once: true });
+      try { els.video.currentTime = Math.min(duration, Math.max(0, t)); } catch (e) { els.video.removeEventListener('seeked', onSeeked); rej(e); }
+    });
+    const epsilon = 1e-4;
+
+    // 导出时的像素化块大小与缩放一致
+    const exportPixel = Math.max(1, Math.round((state.pixelSize || 1) * (srcW / Math.max(1, Math.round(srcW * scale)))));
+    pixelOverride = exportPixel;
+
+    for (let i = 0; i < N; i++) {
+      if (state.cancelExport) break;
+      const t = Math.min(duration - epsilon, i / fps);
+      await seekTo(t);
+      renderFrame();
+      // 将渲染结果缩放到单帧尺寸
+      tctx.clearRect(0, 0, outW, outH);
+      tctx.drawImage(els.canvas, 0, 0, srcW, srcH, 0, 0, outW, outH);
+      // 画入 sheet
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      sctx.drawImage(tile, col * outW, row * outH);
+      updateProgress((i+1)/N);
+      await new Promise(r => setTimeout(r, 0));
+    }
+
+    // 还原尺寸
+    els.canvas.style.width = prevCssW;
+    els.canvas.style.height = prevCssH;
+    els.canvas.width = prevW; els.canvas.height = prevH;
+    gl.viewport(0, 0, prevW, prevH);
+    pixelOverride = null;
+
+    if (state.cancelExport) { finishSvgExport(true); setStatus(t('exportCanceled')); if (wasPlaying) els.video.play().catch(()=>{}); return; }
+
+    // 生成 PNG，仅 PNG 下载项
+    let pngUrl;
+    try { pngUrl = sheet.toDataURL('image/png'); } catch (_) { pngUrl = null; }
+    els.exportResult.innerHTML = '';
+    if (pngUrl) {
+      const img = document.createElement('img');
+      img.src = pngUrl; img.alt = 'Spritesheet Preview';
+      const wrap = document.createElement('div');
+      wrap.className = 'svg-preview';
+      wrap.appendChild(img);
+      els.exportResult.appendChild(wrap);
+      applyPreviewBg();
+      const a = document.createElement('a');
+      a.href = pngUrl; a.download = 'chroma-keyed-spritesheet.png'; a.textContent = t('downloadSheet');
+      els.exportResult.appendChild(a);
+      setStatus(t('sheetExportDone', { N, w: sheetW, h: sheetH }));
+    } else {
+      setStatus(currentLang==='zh' ? '无法导出 PNG（可能尺寸过大）' : 'Failed to export PNG (maybe too large)');
+    }
+
+    finishSvgExport();
+    if (wasPlaying) els.video.play().catch(()=>{});
   }
 
 
