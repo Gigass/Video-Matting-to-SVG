@@ -282,6 +282,14 @@
       return pow(c, vec3(1.0/2.2));
     }
 
+    // RGB (linear) to YUV (BT.601-like). Y in [0,1], U/V roughly centered around 0.
+    vec3 rgb2yuv(vec3 c) {
+      float y = dot(c, vec3(0.299, 0.587, 0.114));
+      float u = dot(c, vec3(-0.14713, -0.28886, 0.436));
+      float v = dot(c, vec3(0.615, -0.51499, -0.10001));
+      return vec3(y, u, v);
+    }
+
     void main(){
       // pixelation: quantize uv based on output pixel blocks
       vec2 stepUV = vec2(max(1.0, u_pixel)) / max(u_viewSize, vec2(1.0));
@@ -300,21 +308,36 @@
       // compute alpha only when key is present
       float alpha = 1.0;
       if (u_hasKey == 1) {
-        float d = distance(col, u_key);
+        // Work in chroma plane (YUV) to reduce luminance sensitivity
+        vec3 yuv = rgb2yuv(col);
+        vec3 keyYuv = rgb2yuv(u_key);
+        vec2 duv = yuv.yz - keyYuv.yz;
+        float chromaDist = length(duv);
+        // Saturation proxy: chroma magnitude. Protect low-saturation regions from being keyed out.
+        float sat = length(yuv.yz);
+        float satGate = smoothstep(0.05, 0.25, sat); // 0 at very low chroma, 1 at typical saturated bg
+        // Add a small bias to distance when saturation is low -> increases alpha (keeps subject)
+        float d = chromaDist + (1.0 - satGate) * 0.15;
         alpha = smoothstep(u_thresh - u_soft, u_thresh + u_soft, d);
       }
 
-      // spill suppression: reduce contribution of key color channel
-      // compute per-channel towards neutral based on key dominance
-      vec3 kN = normalize(u_key + 1e-6);
-      float kDominance = max(max(kN.r, kN.g), kN.b);
+      // Spill suppression (directional): only reduce components aligned with key chroma and mostly background
       vec3 spillFixed = col;
-      if (kDominance > 0.0 && u_hasKey == 1) {
-        // project color onto key direction
-        float proj = dot(col, normalize(u_key));
-        vec3 keyComp = proj * normalize(u_key);
-        vec3 rest = col - keyComp;
-        spillFixed = mix(col, rest, u_spill * (1.0 - alpha));
+      if (u_hasKey == 1) {
+        vec3 yuv = rgb2yuv(col);
+        vec3 keyYuv = rgb2yuv(u_key);
+        vec2 uv = yuv.yz;
+        vec2 kuv = keyYuv.yz;
+        float uvLen = max(1e-6, length(uv));
+        float kLen = max(1e-6, length(kuv));
+        float directional = max(0.0, dot(uv/uvLen, kuv/kLen)); // alignment with key chroma
+        float spillAmt = u_spill * (1.0 - alpha) * directional;
+        // Project onto key direction in RGB and subtract proportionally
+        vec3 kDir = normalize(u_key + 1e-6);
+        float proj = dot(spillFixed, kDir);
+        vec3 keyComp = proj * kDir;
+        vec3 rest = spillFixed - keyComp;
+        spillFixed = mix(spillFixed, rest, clamp(spillAmt, 0.0, 1.0));
       }
 
       // apply exclusion mask
