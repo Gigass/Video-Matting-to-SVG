@@ -19,6 +19,10 @@
       spill: '溢色抑制',
       sharpen: '锐化',
       pixelate: '像素化',
+      cropTitle: '裁切',
+      cropEnable: '启用裁切',
+      cropEdit: '编辑裁切',
+      cropConfirm: '确认裁切',
       bgTitle: '背景',
       bgTransparent: '透明',
       bgSolid: '纯色',
@@ -75,6 +79,10 @@
       spill: 'Spill Suppression',
       sharpen: 'Sharpen',
       pixelate: 'Pixelation',
+      cropTitle: 'Crop',
+      cropEnable: 'Enable Crop',
+      cropEdit: 'Edit Crop',
+      cropConfirm: 'Confirm Crop',
       bgTitle: 'Background',
       bgTransparent: 'Transparent',
       bgSolid: 'Solid',
@@ -170,6 +178,10 @@
     exportSvgAnimBtn: document.getElementById('exportSvgAnimBtn'),
     exportSpritesheetBtn: document.getElementById('exportSpritesheetBtn'),
     cancelSvgExportBtn: document.getElementById('cancelSvgExportBtn'),
+    cropEnable: document.getElementById('cropEnable'),
+    cropEditBtn: document.getElementById('cropEditBtn'),
+    cropConfirmBtn: document.getElementById('cropConfirmBtn'),
+    cropResetBtn: document.getElementById('cropResetBtn'),
     fpsInput: document.getElementById('fpsInput'),
     scaleSelect: document.getElementById('scaleSelect'),
     frameFormat: document.getElementById('frameFormat'),
@@ -214,6 +226,9 @@
     previewBgUrl: null,
     previewBgDataUrl: null,
     includeBg: false,
+    cropEnabled: false,
+    editCrop: false,
+    crop: { x0: 0, y0: 0, x1: 1, y1: 1 },
     duration: 0,
     isPlaying: false,
     isPainting: false,
@@ -273,6 +288,9 @@
     uniform sampler2D u_mask;   // exclusion mask (0..1), 1 means use original video
     uniform int u_hasMask;
     uniform int u_hasKey;       // 0 no keying, 1 apply keying
+    uniform vec2 u_crop0;       // crop min UV
+    uniform vec2 u_crop1;       // crop max UV
+    uniform int u_fillCrop;     // 1: fill entire output with crop (no letterbox)
 
     // simple linearization for sRGB
     vec3 toLinear(vec3 c) {
@@ -291,17 +309,36 @@
     }
 
     void main(){
-      // pixelation: quantize uv based on output pixel blocks
+      // Compute display region to avoid stretch: letterbox/pillarbox unless u_fillCrop==1
+      vec2 dr0 = vec2(0.0);
+      vec2 dr1 = vec2(1.0);
+      if (u_fillCrop == 0) {
+        vec2 csz = u_crop1 - u_crop0;
+        float cropAR = csz.x / max(1e-6, csz.y);
+        float dispAR = u_viewSize.x / max(1.0, u_viewSize.y);
+        if (dispAR > cropAR) {
+          float w = cropAR / dispAR; dr0.x = (1.0 - w) * 0.5; dr1.x = 1.0 - dr0.x;
+        } else {
+          float h = dispAR / cropAR; dr0.y = (1.0 - h) * 0.5; dr1.y = 1.0 - dr0.y;
+        }
+      }
+      // pixelation: quantize inside display region
       vec2 stepUV = vec2(max(1.0, u_pixel)) / max(u_viewSize, vec2(1.0));
-      vec2 uvq = floor(v_uv / stepUV) * stepUV + stepUV * 0.5;
-      vec4 src = texture2D(u_tex, uvq);
+      vec2 region = max(dr1 - dr0, vec2(1e-6));
+      vec2 localStep = stepUV / region;
+      vec2 l = (v_uv - dr0) / region;
+      vec2 lq = floor(l / localStep) * localStep + localStep * 0.5;
+      vec2 uvq = lq; // local 0..1 in display region
+      vec2 uvc = mix(u_crop0, u_crop1, uvq); // map to source crop uv
+      vec4 src = texture2D(u_tex, uvc);
       vec3 col = toLinear(src.rgb);
       // simple unsharp mask in linear space (4-neighbor)
       vec2 texel = 1.0 / max(u_viewSize, vec2(1.0));
-      vec3 nb1 = toLinear(texture2D(u_tex, uvq + vec2(texel.x, 0.0)).rgb);
-      vec3 nb2 = toLinear(texture2D(u_tex, uvq + vec2(-texel.x, 0.0)).rgb);
-      vec3 nb3 = toLinear(texture2D(u_tex, uvq + vec2(0.0, texel.y)).rgb);
-      vec3 nb4 = toLinear(texture2D(u_tex, uvq + vec2(0.0, -texel.y)).rgb);
+      vec2 texelUV = (u_crop1 - u_crop0) * (texel / region); // neighbor step respecting display region scale
+      vec3 nb1 = toLinear(texture2D(u_tex, uvc + vec2(texelUV.x, 0.0)).rgb);
+      vec3 nb2 = toLinear(texture2D(u_tex, uvc + vec2(-texelUV.x, 0.0)).rgb);
+      vec3 nb3 = toLinear(texture2D(u_tex, uvc + vec2(0.0, texelUV.y)).rgb);
+      vec3 nb4 = toLinear(texture2D(u_tex, uvc + vec2(0.0, -texelUV.y)).rgb);
       vec3 blur = (col*4.0 + nb1 + nb2 + nb3 + nb4) / 8.0;
       vec3 colSharpen = clamp(col + (col - blur) * (1.5 * u_sharpen), 0.0, 1.0);
       col = mix(col, colSharpen, u_sharpen);
@@ -340,10 +377,10 @@
         spillFixed = mix(spillFixed, rest, clamp(spillAmt, 0.0, 1.0));
       }
 
-      // apply exclusion mask
+      // apply exclusion mask sampled in source UV (follows crop and scale exactly)
       float m = 0.0;
       if (u_hasMask == 1) {
-        m = texture2D(u_mask, v_uv).r;
+        m = texture2D(u_mask, uvc).r;
       }
       vec3 outRGB = mix(spillFixed, col, m);
       float outA = mix(alpha, 1.0, m);
@@ -354,6 +391,11 @@
         vec3 bg = toSRGB(u_bgColor);
         outColor.rgb = outColor.rgb * outColor.a + bg * (1.0 - outColor.a);
         outColor.a = 1.0;
+      }
+      // Outside display region: transparent
+      vec2 uvIn = (v_uv - dr0) / region;
+      if (any(lessThan(uvIn, vec2(0.0))) || any(greaterThan(uvIn, vec2(1.0)))) {
+        outColor = vec4(0.0);
       }
       gl_FragColor = outColor;
     }
@@ -378,6 +420,9 @@
     u_mask: gl.getUniformLocation(program, 'u_mask'),
     u_hasMask: gl.getUniformLocation(program, 'u_hasMask'),
     u_hasKey: gl.getUniformLocation(program, 'u_hasKey'),
+    u_crop0: gl.getUniformLocation(program, 'u_crop0'),
+    u_crop1: gl.getUniformLocation(program, 'u_crop1'),
+    u_fillCrop: gl.getUniformLocation(program, 'u_fillCrop'),
   };
 
   // fullscreen quad
@@ -412,6 +457,7 @@
 
   let rafId = 0;
   let pixelOverride = null; // 在导出时覆盖像素块大小（按最终导出尺寸匹配预览块感）
+  let fillCropOverride = null; // 在导出时填满输出（无信箱），预览时置空以避免拉伸
   let rvfcSupported = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
 
   function setStatus(msg) { els.status.textContent = msg; }
@@ -496,6 +542,11 @@
     const px = Math.max(1, (pixelOverride != null ? pixelOverride : state.pixelSize) || 1);
     gl.uniform1f(uniforms.u_pixel, px);
     gl.uniform1f(uniforms.u_sharpen, Math.max(0.0, Math.min(1.0, state.sharpen || 0)));
+    // crop uniforms
+    const cu = state.cropEnabled ? state.crop : {x0:0,y0:0,x1:1,y1:1};
+    gl.uniform2f(uniforms.u_crop0, Math.min(cu.x0, cu.x1), Math.min(cu.y0, cu.y1));
+    gl.uniform2f(uniforms.u_crop1, Math.max(cu.x0, cu.x1), Math.max(cu.y0, cu.y1));
+    gl.uniform1i(uniforms.u_fillCrop, (fillCropOverride!=null ? fillCropOverride : 0));
 
     // upload composite mask (union of clips active at current time)
     let hasMask = 0;
@@ -507,10 +558,14 @@
         renderFrame._comp = document.createElement('canvas');
         renderFrame._compCtx = renderFrame._comp.getContext('2d', { willReadFrequently:true });
       }
+      const srcW = Math.max(1, els.video.videoWidth|0), srcH = Math.max(1, els.video.videoHeight|0);
       const c = renderFrame._comp, ctx = renderFrame._compCtx;
-      if (c.width !== els.canvas.width || c.height !== els.canvas.height) { c.width = els.canvas.width; c.height = els.canvas.height; }
+      if (c.width !== srcW || c.height !== srcH) { c.width = srcW; c.height = srcH; }
       ctx.clearRect(0,0,c.width,c.height);
-      for (const h of hits){ ctx.drawImage(h.maskCanvas, 0,0, h.maskCanvas.width, h.maskCanvas.height, 0,0, c.width, c.height); }
+      // Union draw active masks in source resolution
+      for (const h of hits){
+        ctx.drawImage(h.maskCanvas, 0,0, h.maskCanvas.width, h.maskCanvas.height, 0,0, c.width, c.height);
+      }
       return c;
     })();
     if (activeMask) {
@@ -525,46 +580,89 @@
 
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-    // Draw mask overlay tint (red) for SELECTED clip; also draw brush cursor ring
+    // Draw overlays: mask tint, brush ring, crop rectangle
     const post = document.getElementById('post');
     if (post) {
-      // Prefer selected clip's mask for visibility, fallback to time-hit clip
+      if (!renderFrame._postCtx) renderFrame._postCtx = post.getContext('2d', { willReadFrequently: true });
+      const ctx2d = renderFrame._postCtx;
+      if (post.width !== els.canvas.width || post.height !== els.canvas.height) {
+        post.width = els.canvas.width; post.height = els.canvas.height;
+      }
+      ctx2d.clearRect(0,0,post.width, post.height);
+
+      let overlayShown = false;
+      // Mask tint for selected clip
       let clip = state.clips.find(c => c.id === state.activeClipId) || null;
       if (clip && clip.maskCanvas) {
-        if (!renderFrame._postCtx) renderFrame._postCtx = post.getContext('2d', { willReadFrequently: true });
-        const ctx2d = renderFrame._postCtx;
-        // ensure post canvas aligns to preview size
-        if (post.width !== els.canvas.width || post.height !== els.canvas.height) {
-          post.width = els.canvas.width; post.height = els.canvas.height;
-        }
-        ctx2d.clearRect(0,0,post.width, post.height);
-        // draw mask alpha
-        ctx2d.drawImage(clip.maskCanvas, 0,0, clip.maskCanvas.width, clip.maskCanvas.height, 0,0, post.width, post.height);
-        // tint
+        const rgn = getDisplayRegionRect();
+        const dx = rgn.x0 * post.width, dy = rgn.y0 * post.height;
+        const dw = Math.max(1, (rgn.x1 - rgn.x0) * post.width);
+        const dh = Math.max(1, (rgn.y1 - rgn.y0) * post.height);
+        const cx0 = Math.min(state.crop.x0, state.crop.x1), cx1 = Math.max(state.crop.x0, state.crop.x1);
+        const cy0 = Math.min(state.crop.y0, state.crop.y1), cy1 = Math.max(state.crop.y0, state.crop.y1);
+        const sx = Math.round(cx0 * clip.maskCanvas.width);
+        const sy = Math.round(cy0 * clip.maskCanvas.height);
+        const sw = Math.max(1, Math.round((cx1 - cx0) * clip.maskCanvas.width));
+        const sh = Math.max(1, Math.round((cy1 - cy0) * clip.maskCanvas.height));
+        ctx2d.drawImage(clip.maskCanvas, sx, sy, sw, sh, dx, dy, dw, dh);
         ctx2d.globalCompositeOperation='source-in';
         ctx2d.fillStyle='rgba(255,0,0,0.30)';
-        ctx2d.fillRect(0,0,post.width, post.height);
+        ctx2d.fillRect(dx, dy, dw, dh);
         ctx2d.globalCompositeOperation='source-over';
-        // draw brush cursor ring
+        overlayShown = true;
+        // brush cursor ring
         if (state.isPainting && (state.tool==='brushAdd' || state.tool==='brushErase')) {
           const color = state.tool==='brushAdd' ? 'rgba(255,255,0,0.9)' : 'rgba(0,120,255,0.9)';
-          // last cursor stored by mousemove via getCanvasPixelPos; we can compute from event each time but here not retained.
-          // As fallback, skip unless we have lastCursor on state
           const lc = state.lastCursor;
           if (lc) {
-            ctx2d.save();
-            ctx2d.strokeStyle = color;
-            ctx2d.lineWidth = 2;
-            const scale = Math.max(clip.maskCanvas.width/post.width, clip.maskCanvas.height/post.height);
+            ctx2d.save(); ctx2d.strokeStyle = color; ctx2d.lineWidth = 2;
             const r = (state.brushSize||18);
             ctx2d.beginPath(); ctx2d.arc(lc.x, lc.y, r, 0, Math.PI*2); ctx2d.stroke(); ctx2d.restore();
           }
         }
-        post.style.display='block';
-      } else {
-        post.style.display='none';
       }
+      // Crop overlay
+      if (state.cropEnabled) {
+        const r = getDisplayRegionRect();
+        const rx0 = (r.x0 + state.crop.x0 * (r.x1 - r.x0)) * post.width;
+        const ry0 = (r.y0 + state.crop.y0 * (r.y1 - r.y0)) * post.height;
+        const rx1 = (r.x0 + state.crop.x1 * (r.x1 - r.x0)) * post.width;
+        const ry1 = (r.y0 + state.crop.y1 * (r.y1 - r.y0)) * post.height;
+        const x0 = Math.min(rx0, rx1), x1 = Math.max(rx0, rx1);
+        const y0 = Math.min(ry0, ry1), y1 = Math.max(ry0, ry1);
+        ctx2d.save();
+        // darken outside (only during editing for less distraction)
+        if (state.editCrop) {
+          ctx2d.fillStyle = 'rgba(0,0,0,0.25)';
+          ctx2d.beginPath(); ctx2d.rect(0,0,post.width, post.height); ctx2d.rect(x0,y0,x1-x0,y1-y0); ctx2d.fill('evenodd');
+        }
+        // border
+        ctx2d.strokeStyle = '#00c2ff'; ctx2d.lineWidth = 2; ctx2d.strokeRect(x0+1, y0+1, Math.max(0,x1-x0-2), Math.max(0,y1-y0-2));
+        // handles only when editing
+        if (state.editCrop) { drawHandle(ctx2d, x0, y0); drawHandle(ctx2d, x1, y0); drawHandle(ctx2d, x0, y1); drawHandle(ctx2d, x1, y1); }
+        ctx2d.restore();
+        overlayShown = true;
+      }
+      post.style.display = overlayShown ? 'block' : 'none';
     }
+  }
+
+  function drawHandle(ctx, x, y){ ctx.fillStyle = '#00c2ff'; const s=6; ctx.fillRect(x-s, y-s, s*2, s*2); }
+
+  // Compute display region (normalized 0..1 in canvas) matching shader letterbox logic
+  function getDisplayRegionRect(){
+    const cu = state.cropEnabled ? state.crop : {x0:0,y0:0,x1:1,y1:1};
+    const cszx = Math.max(1e-6, Math.abs(cu.x1 - cu.x0));
+    const cszy = Math.max(1e-6, Math.abs(cu.y1 - cu.y0));
+    const cropAR = cszx / cszy;
+    const dispAR = (els.canvas.width||1) / Math.max(1, els.canvas.height||1);
+    let x0=0, y0=0, x1=1, y1=1;
+    if (dispAR > cropAR) {
+      const w = cropAR / dispAR; x0 = (1 - w) * 0.5; x1 = 1 - x0;
+    } else {
+      const h = dispAR / cropAR; y0 = (1 - h) * 0.5; y1 = 1 - y0;
+    }
+    return {x0,y0,x1,y1};
   }
 
   function getActiveMaskCanvas(){
@@ -615,28 +713,49 @@
     ctx.restore();
   }
 
-  // Canvas-pixel based painting (uses preview canvas pixel coordinates)
+  // Helper: map canvas pixel to source mask pixel (considering letterbox + crop)
+  function mapCanvasToSource(px, py){
+    const cw = Math.max(1, els.canvas.width), ch = Math.max(1, els.canvas.height);
+    const u = px / cw, v = py / ch;
+    const r = getDisplayRegionRect();
+    if (u < r.x0 || u > r.x1 || v < r.y0 || v > r.y1) return null;
+    const lxu = (u - r.x0) / Math.max(1e-6, (r.x1 - r.x0));
+    const lyv = (v - r.y0) / Math.max(1e-6, (r.y1 - r.y0));
+    const cu = state.cropEnabled ? state.crop : {x0:0,y0:0,x1:1,y1:1};
+    const su = cu.x0 + (cu.x1 - cu.x0) * lxu;
+    const sv = cu.y0 + (cu.y1 - cu.y0) * lyv;
+    const maskW = Math.max(1, (els.video.videoWidth|0)), maskH = Math.max(1, (els.video.videoHeight|0));
+    const mx = Math.round(su * maskW);
+    const my = Math.round(sv * maskH);
+    const dispWpx = (r.x1 - r.x0) * cw;
+    const dispHpx = (r.y1 - r.y0) * ch;
+    const cropWpx = Math.abs(cu.x1 - cu.x0) * maskW;
+    const cropHpx = Math.abs(cu.y1 - cu.y0) * maskH;
+    const sx = cropWpx / Math.max(1e-6, dispWpx);
+    const sy = cropHpx / Math.max(1e-6, dispHpx);
+    return { mx, my, sx, sy };
+  }
+
+  // Canvas-pixel based painting mapped to source mask
   function paintAtCanvas(clip, cx, cy, add){
     if (!clip || !clip.ctx) return;
+    const m = mapCanvasToSource(cx, cy); if (!m) return;
     const ctx = clip.ctx;
-    // map preview canvas pixels -> mask canvas pixels (same aspect assumed)
-    const scaleX = clip.maskCanvas.width / (els.canvas.width||1);
-    const scaleY = clip.maskCanvas.height / (els.canvas.height||1);
-    const r = (state.brushSize||18) * Math.max(scaleX, scaleY);
+    const r = (state.brushSize||18) * Math.max(m.sx, m.sy);
     ctx.save();
     if (add) { ctx.globalCompositeOperation='source-over'; ctx.fillStyle='#ffffff'; }
     else { ctx.globalCompositeOperation='destination-out'; ctx.fillStyle='#000000'; }
-    ctx.beginPath(); ctx.arc(cx*scaleX, cy*scaleY, r, 0, Math.PI*2); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.arc(m.mx, m.my, r, 0, Math.PI*2); ctx.closePath(); ctx.fill();
     ctx.restore();
   }
 
   function rectPaintCanvas(clip, a, b, add){
     if (!clip || !clip.ctx) return;
+    const p0 = mapCanvasToSource(a.x, a.y); const p1 = mapCanvasToSource(b.x, b.y);
+    if (!p0 || !p1) return;
     const ctx = clip.ctx;
-    const scaleX = clip.maskCanvas.width / (els.canvas.width||1);
-    const scaleY = clip.maskCanvas.height / (els.canvas.height||1);
-    const x0 = Math.min(a.x,b.x)*scaleX, y0 = Math.min(a.y,b.y)*scaleY;
-    const w = Math.abs(a.x-b.x)*scaleX, h = Math.abs(a.y-b.y)*scaleY;
+    const x0 = Math.min(p0.mx, p1.mx), y0 = Math.min(p0.my, p1.my);
+    const w = Math.abs(p0.mx - p1.mx), h = Math.abs(p0.my - p1.my);
     ctx.save();
     if (add) { ctx.globalCompositeOperation='source-over'; ctx.fillStyle='#ffffff'; }
     else { ctx.globalCompositeOperation='destination-out'; ctx.fillStyle='#000000'; }
@@ -664,6 +783,56 @@ function loopRVFC(now, metadata) {
     renderFrame();
   }));
   els.bgColor.addEventListener('change', () => { renderFrame(); });
+
+  // Crop controls
+  if (els.cropEnable) {
+    els.cropEnable.addEventListener('change', () => {
+      state.cropEnabled = !!els.cropEnable.checked;
+      if (els.cropEditBtn) els.cropEditBtn.disabled = !state.cropEnabled || !state.hasVideo;
+      if (els.cropResetBtn) els.cropResetBtn.disabled = !state.cropEnabled || !state.hasVideo;
+      if (!state.cropEnabled && state.editCrop) {
+        state.editCrop = false;
+        els.cropEditBtn?.classList.remove('active');
+        const post = document.getElementById('post');
+        if (post) post.classList.remove('crop-editing');
+        if (els.pickColorBtn) els.pickColorBtn.disabled = !state.hasVideo;
+        if (els.cropConfirmBtn) els.cropConfirmBtn.disabled = true;
+      }
+      renderFrame();
+      updateScaleInfo();
+    });
+  }
+  if (els.cropResetBtn) {
+    els.cropResetBtn.addEventListener('click', () => {
+      state.crop = { x0:0, y0:0, x1:1, y1:1 };
+      renderFrame();
+      updateScaleInfo();
+    });
+  }
+  if (els.cropConfirmBtn) {
+    els.cropConfirmBtn.addEventListener('click', () => {
+      if (!state.editCrop) return;
+      state.editCrop = false;
+      els.cropEditBtn?.classList.remove('active');
+      const post = document.getElementById('post');
+      if (post) post.classList.remove('crop-editing');
+      if (els.pickColorBtn) els.pickColorBtn.disabled = !state.hasVideo;
+      els.cropConfirmBtn.disabled = true;
+      renderFrame();
+      updateScaleInfo();
+    });
+  }
+  if (els.cropEditBtn) {
+    els.cropEditBtn.addEventListener('click', () => {
+      if (!state.cropEnabled) return;
+      state.editCrop = true;
+      els.cropEditBtn.classList.add('active');
+      const post = document.getElementById('post');
+      if (post) post.classList.add('crop-editing');
+      if (els.pickColorBtn) els.pickColorBtn.disabled = true;
+      if (els.cropConfirmBtn) els.cropConfirmBtn.disabled = false;
+    });
+  }
 
   els.threshold.addEventListener('input', () => {
     state.threshold = parseFloat(els.threshold.value);
@@ -703,6 +872,7 @@ function loopRVFC(now, metadata) {
   // Canvas interactions: picking or painting
   els.canvas.addEventListener('mousedown', (e) => {
     if (!state.hasVideo) return;
+    if (state.editCrop && state.cropEnabled) { beginCropDrag(e); e.preventDefault(); return; }
     const pos = getCanvasPos(e);
     const cpos = getCanvasPixelPos(e);
     if (state.picking) {
@@ -718,6 +888,7 @@ function loopRVFC(now, metadata) {
   });
   window.addEventListener('mousemove', (e) => {
     if (!state.hasVideo) return;
+    if (state.editCrop && state._cropDrag) { updateCropDrag(e); e.preventDefault(); return; }
     const pos = getCanvasPos(e);
     const cpos = getCanvasPixelPos(e);
     state.lastCursor = { x: Math.max(0, Math.min(els.canvas.width-1, Math.round((cpos.x/els.canvas.width)*els.canvas.width))),
@@ -740,6 +911,7 @@ function loopRVFC(now, metadata) {
   });
   window.addEventListener('mouseup', (e) => {
     const pos = getCanvasPos(e);
+    if (state._cropDrag) { endCropDrag(); e.preventDefault(); return; }
     state.isPainting = false;
     if (state.picking && dragStart != null) {
       const start = dragStart; dragStart = null; pickFromRegion(start, pos);
@@ -754,9 +926,74 @@ function loopRVFC(now, metadata) {
   });
   els.canvas.addEventListener('mouseleave', ()=>{ state.isPainting = false; });
 
+  // --- Crop drag helpers ---
+  function beginCropDrag(e){
+    const rect = els.canvas.getBoundingClientRect();
+    const px = (e.clientX - rect.left) / Math.max(1, rect.width);
+    const py = (e.clientY - rect.top) / Math.max(1, rect.height);
+    const c = state.crop;
+    const x0u = Math.min(c.x0, c.x1), x1u = Math.max(c.x0, c.x1);
+    const y0u = Math.min(c.y0, c.y1), y1u = Math.max(c.y0, c.y1);
+    // map crop edges into canvas UV considering letterbox region
+    const r = getDisplayRegionRect();
+    const x0 = r.x0 + x0u * (r.x1 - r.x0);
+    const x1 = r.x0 + x1u * (r.x1 - r.x0);
+    const y0 = r.y0 + y0u * (r.y1 - r.y0);
+    const y1 = r.y0 + y1u * (r.y1 - r.y0);
+    const tol = 8 / Math.max(1, rect.width); // tolerance in UV space (~8px)
+    const near = (a,b,t)=> Math.abs(a-b) <= t;
+    const inside = px>=x0 && px<=x1 && py>=y0 && py<=y1;
+    let mode = '';
+    if (near(px,x0,tol) && near(py,y0,tol)) mode='tl';
+    else if (near(px,x1,tol) && near(py,y0,tol)) mode='tr';
+    else if (near(px,x0,tol) && near(py,y1,tol)) mode='bl';
+    else if (near(px,x1,tol) && near(py,y1,tol)) mode='br';
+    else if (near(px,x0,tol) && py>=y0 && py<=y1) mode='l';
+    else if (near(px,x1,tol) && py>=y0 && py<=y1) mode='r';
+    else if (near(py,y0,tol) && px>=x0 && px<=x1) mode='t';
+    else if (near(py,y1,tol) && px>=x0 && px<=x1) mode='b';
+    else if (inside) mode='move';
+    else mode='new';
+    state._cropDrag = { mode, start: {px,py}, orig: {...c}, box: {x0,y0,x1,y1} };
+  }
+  function updateCropDrag(e){
+    const d = state._cropDrag; if (!d) return;
+    const rect = els.canvas.getBoundingClientRect();
+    const px = (e.clientX - rect.left) / Math.max(1, rect.width);
+    const py = (e.clientY - rect.top) / Math.max(1, rect.height);
+    const dx = px - d.start.px; const dy = py - d.start.py;
+    let { x0,y0,x1,y1 } = state.crop;
+    const clamp01 = (v)=> Math.max(0, Math.min(1, v));
+    switch(d.mode){
+      case 'move': {
+        const w = d.box.x1 - d.box.x0, h = d.box.y1 - d.box.y0;
+        const nx0 = clamp01(d.box.x0 + dx), ny0 = clamp01(d.box.y0 + dy);
+        x0 = nx0; y0 = ny0; x1 = clamp01(nx0 + w); y1 = clamp01(ny0 + h);
+        break;
+      }
+      case 'tl': x0 = clamp01(d.orig.x0 + dx); y0 = clamp01(d.orig.y0 + dy); break;
+      case 'tr': x1 = clamp01(d.orig.x1 + dx); y0 = clamp01(d.orig.y0 + dy); break;
+      case 'bl': x0 = clamp01(d.orig.x0 + dx); y1 = clamp01(d.orig.y1 + dy); break;
+      case 'br': x1 = clamp01(d.orig.x1 + dx); y1 = clamp01(d.orig.y1 + dy); break;
+      case 'l': x0 = clamp01(d.orig.x0 + dx); break;
+      case 'r': x1 = clamp01(d.orig.x1 + dx); break;
+      case 't': y0 = clamp01(d.orig.y0 + dy); break;
+      case 'b': y1 = clamp01(d.orig.y1 + dy); break;
+      case 'new': {
+        x0 = clamp01(d.start.px); y0 = clamp01(d.start.py);
+        x1 = clamp01(px); y1 = clamp01(py);
+        break;
+      }
+    }
+    state.crop = { x0, y0, x1, y1 };
+    renderFrame();
+    updateScaleInfo();
+  }
+  function endCropDrag(){ state._cropDrag = null; }
+
   els.resetBtn.addEventListener('click', () => {
     state.keyColor = null; setKeySwatch(null);
-    els.threshold.value = '1'; els.threshold.dispatchEvent(new Event('input'));
+    els.threshold.value = '0.28'; els.threshold.dispatchEvent(new Event('input'));
     els.softness.value = '1'; els.softness.dispatchEvent(new Event('input'));
     els.spill.value = '0.3'; els.spill.dispatchEvent(new Event('input'));
     bgModeInputs.find(x => x.value==='transparent').checked = true; state.bgMode='transparent';
@@ -857,8 +1094,9 @@ function loopRVFC(now, metadata) {
   function addClip(start, end){
     const id = Date.now()+Math.random();
     const maskCanvas = document.createElement('canvas');
-    // 初版用预览分辨率，后续导出时可升至源分辨率
-    maskCanvas.width = els.canvas.width; maskCanvas.height = els.canvas.height;
+    // 使用源视频分辨率，保证与裁切/缩放无关
+    const vw = Math.max(1, els.video.videoWidth|0), vh = Math.max(1, els.video.videoHeight|0);
+    maskCanvas.width = vw; maskCanvas.height = vh;
     const ctx = maskCanvas.getContext('2d', { willReadFrequently: true });
     // 透明背景，alpha=0 表示不排除，白色（alpha=1）表示排除
     ctx.clearRect(0,0,maskCanvas.width, maskCanvas.height);
@@ -980,6 +1218,8 @@ function loopRVFC(now, metadata) {
     if (els.exportSpritesheetBtn) els.exportSpritesheetBtn.disabled = false;
     if (els.playPauseBtn) els.playPauseBtn.disabled = false;
     if (els.addClipBtn) els.addClipBtn.disabled = false;
+    if (els.cropEditBtn) els.cropEditBtn.disabled = !state.cropEnabled;
+    if (els.cropResetBtn) els.cropResetBtn.disabled = !state.cropEnabled;
     if (document.getElementById('deleteClipBtn')) document.getElementById('deleteClipBtn').disabled = false;
     if (els.toolBrushAdd) els.toolBrushAdd.disabled = false;
     if (els.toolBrushErase) els.toolBrushErase.disabled = false;
@@ -1158,10 +1398,20 @@ function loopRVFC(now, metadata) {
     const prevCssH = els.canvas.style.height;
     const prevW = els.canvas.width, prevH = els.canvas.height;
     const srcW = els.video.videoWidth, srcH = els.video.videoHeight;
-    els.canvas.style.width = `${srcW}px`;
-    els.canvas.style.height = `${srcH}px`;
-    els.canvas.width = srcW; els.canvas.height = srcH;
-    gl.viewport(0, 0, srcW, srcH);
+    const cx0 = state.cropEnabled ? Math.min(state.crop.x0, state.crop.x1) : 0;
+    const cy0 = state.cropEnabled ? Math.min(state.crop.y0, state.crop.y1) : 0;
+    const cx1 = state.cropEnabled ? Math.max(state.crop.x0, state.crop.x1) : 1;
+    const cy1 = state.cropEnabled ? Math.max(state.crop.y0, state.crop.y1) : 1;
+    const cropW = Math.max(1, Math.round((cx1 - cx0) * srcW));
+    const cropH = Math.max(1, Math.round((cy1 - cy0) * srcH));
+    const useW = state.cropEnabled ? cropW : srcW;
+    const useH = state.cropEnabled ? cropH : srcH;
+    els.canvas.style.width = `${useW}px`;
+    els.canvas.style.height = `${useH}px`;
+    els.canvas.width = useW; els.canvas.height = useH;
+    gl.viewport(0, 0, useW, useH);
+    // Fill crop during export to avoid letterbox bars
+    fillCropOverride = state.cropEnabled ? 1 : 0;
 
     const totalFrames = Math.max(1, Math.floor(duration * fps));
     const maxFrames = 600; // 安全上限
@@ -1171,8 +1421,8 @@ function loopRVFC(now, metadata) {
     const images = [];
     // 输出尺寸（按缩放）
     const scale = Math.max(0.1, Math.min(1, state.scale || 0.5));
-    const outW = Math.max(1, Math.round(srcW * scale));
-    const outH = Math.max(1, Math.round(srcH * scale));
+    const outW = Math.max(1, Math.round(cropW * scale));
+    const outH = Math.max(1, Math.round(cropH * scale));
     // 输出帧画布
     const outCanvas = document.createElement('canvas');
     outCanvas.width = outW; outCanvas.height = outH;
@@ -1185,7 +1435,7 @@ function loopRVFC(now, metadata) {
 
     const epsilon = 1e-4;
     // 为了让导出块大小与最终尺寸一致，按缩放比例调整像素块
-    const exportPixel = Math.max(1, Math.round((state.pixelSize || 1) * (srcW / Math.max(1, Math.round(srcW * scale)))));
+    const exportPixel = Math.max(1, Math.round((state.pixelSize || 1) * (useW / Math.max(1, Math.round(useW * scale)))));
     pixelOverride = exportPixel;
 
     for (let i = 0; i < N; i++) {
@@ -1208,6 +1458,7 @@ function loopRVFC(now, metadata) {
     els.canvas.style.height = prevCssH;
     els.canvas.width = prevW; els.canvas.height = prevH;
     gl.viewport(0, 0, prevW, prevH);
+    fillCropOverride = null;
     pixelOverride = null;
     state.bgMode = prevBgMode;
 
@@ -1292,10 +1543,19 @@ function loopRVFC(now, metadata) {
     const prevCssH = els.canvas.style.height;
     const prevW = els.canvas.width, prevH = els.canvas.height;
     const srcW = els.video.videoWidth|0, srcH = els.video.videoHeight|0;
-    els.canvas.style.width = `${srcW}px`;
-    els.canvas.style.height = `${srcH}px`;
-    els.canvas.width = srcW; els.canvas.height = srcH;
-    gl.viewport(0, 0, srcW, srcH);
+    const cx0 = state.cropEnabled ? Math.min(state.crop.x0, state.crop.x1) : 0;
+    const cy0 = state.cropEnabled ? Math.min(state.crop.y0, state.crop.y1) : 0;
+    const cx1 = state.cropEnabled ? Math.max(state.crop.x0, state.crop.x1) : 1;
+    const cy1 = state.cropEnabled ? Math.max(state.crop.y0, state.crop.y1) : 1;
+    const cropW = Math.max(1, Math.round((cx1 - cx0) * srcW));
+    const cropH = Math.max(1, Math.round((cy1 - cy0) * srcH));
+    const useW = state.cropEnabled ? cropW : srcW;
+    const useH = state.cropEnabled ? cropH : srcH;
+    els.canvas.style.width = `${useW}px`;
+    els.canvas.style.height = `${useH}px`;
+    els.canvas.width = useW; els.canvas.height = useH;
+    gl.viewport(0, 0, useW, useH);
+    fillCropOverride = state.cropEnabled ? 1 : 0;
 
     // 帧数限制（与 SVG 导出一致的保护）
     const totalFrames = Math.max(1, Math.floor(duration * fps));
@@ -1305,8 +1565,8 @@ function loopRVFC(now, metadata) {
 
     // 输出尺寸（按缩放）
     const scale = Math.max(0.1, Math.min(1, state.scale || parseFloat(els.scaleSelect?.value || '1') || 1));
-    const outW = Math.max(1, Math.round(srcW * scale));
-    const outH = Math.max(1, Math.round(srcH * scale));
+    const outW = Math.max(1, Math.round(useW * scale));
+    const outH = Math.max(1, Math.round(useH * scale));
 
     // 网格布局（默认接近正方形）
     let cols = Math.max(1, Math.ceil(Math.sqrt(N)));
@@ -1329,6 +1589,7 @@ function loopRVFC(now, metadata) {
       // 还原尺寸
       els.canvas.style.width = prevCssW; els.canvas.style.height = prevCssH;
       els.canvas.width = prevW; els.canvas.height = prevH; gl.viewport(0,0,prevW,prevH);
+      fillCropOverride = null; pixelOverride = null;
       if (wasPlaying) els.video.play().catch(()=>{});
       return;
     }
@@ -1351,7 +1612,7 @@ function loopRVFC(now, metadata) {
     const epsilon = 1e-4;
 
     // 导出时的像素化块大小与缩放一致
-    const exportPixel = Math.max(1, Math.round((state.pixelSize || 1) * (srcW / Math.max(1, Math.round(srcW * scale)))));
+    const exportPixel = Math.max(1, Math.round((state.pixelSize || 1) * (useW / Math.max(1, Math.round(useW * scale)))));
     pixelOverride = exportPixel;
 
     for (let i = 0; i < N; i++) {
@@ -1361,7 +1622,7 @@ function loopRVFC(now, metadata) {
       renderFrame();
       // 将渲染结果缩放到单帧尺寸
       tctx.clearRect(0, 0, outW, outH);
-      tctx.drawImage(els.canvas, 0, 0, srcW, srcH, 0, 0, outW, outH);
+      tctx.drawImage(els.canvas, 0, 0, useW, useH, 0, 0, outW, outH);
       // 画入 sheet
       const col = i % cols;
       const row = Math.floor(i / cols);
@@ -1375,6 +1636,7 @@ function loopRVFC(now, metadata) {
     els.canvas.style.height = prevCssH;
     els.canvas.width = prevW; els.canvas.height = prevH;
     gl.viewport(0, 0, prevW, prevH);
+    fillCropOverride = null;
     pixelOverride = null;
 
     if (state.cancelExport) { finishSvgExport(true); setStatus(t('exportCanceled')); if (wasPlaying) els.video.play().catch(()=>{}); return; }
@@ -1445,8 +1707,14 @@ function loopRVFC(now, metadata) {
     const vw = els.video.videoWidth|0, vh = els.video.videoHeight|0;
     const s = Math.max(0.1, Math.min(1, state.scale||parseFloat(els.scaleSelect?.value||'1')||1));
     if (!state.hasVideo || !vw || !vh) { els.scaleInfo.textContent = ''; return; }
-    const outW = Math.max(1, Math.round(vw * s));
-    const outH = Math.max(1, Math.round(vh * s));
+    const cx0 = state.cropEnabled ? Math.min(state.crop.x0, state.crop.x1) : 0;
+    const cy0 = state.cropEnabled ? Math.min(state.crop.y0, state.crop.y1) : 0;
+    const cx1 = state.cropEnabled ? Math.max(state.crop.x0, state.crop.x1) : 1;
+    const cy1 = state.cropEnabled ? Math.max(state.crop.y0, state.crop.y1) : 1;
+    const cropW = Math.max(1, Math.round((cx1 - cx0) * vw));
+    const cropH = Math.max(1, Math.round((cy1 - cy0) * vh));
+    const outW = Math.max(1, Math.round(cropW * s));
+    const outH = Math.max(1, Math.round(cropH * s));
     els.scaleInfo.textContent = t('actualExport', { w: outW, h: outH });
   }
 

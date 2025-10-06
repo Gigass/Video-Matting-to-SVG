@@ -60,6 +60,20 @@
 
       <aside class="sidebar">
         <div class="panel">
+          <h2 data-i18n="cropTitle">裁切</h2>
+          <div class="row row-inline">
+            <label for="cropEnable" data-i18n="cropEnable">启用裁切</label>
+            <label class="toggle"><input id="cropEnable" type="checkbox" /></label>
+            <span></span>
+          </div>
+          <div class="row row-inline">
+            <button id="cropEditBtn" disabled data-i18n="cropEdit">编辑裁切</button>
+            <button id="cropConfirmBtn" class="btn-ghost" disabled data-i18n="cropConfirm">确认裁切</button>
+            <button id="cropResetBtn" class="btn-ghost" disabled data-i18n="btnResetLabel">重置</button>
+            <span></span>
+          </div>
+        </div>
+        <div class="panel">
           <h2 data-i18n="panelKeyTitle">键色与参数</h2>
           <div class="row">
             <button id="pickColorBtn" disabled data-i18n="pickColor">拾取键色</button>
@@ -67,8 +81,8 @@
           </div>
           <div class="row">
             <label for="threshold" data-i18n="threshold">阈值</label>
-            <input id="threshold" type="range" min="0" max="1" step="0.001" value="1" />
-            <span id="thresholdVal" class="val">1.00</span>
+            <input id="threshold" type="range" min="0" max="1" step="0.001" value="0.28" />
+            <span id="thresholdVal" class="val">0.28</span>
           </div>
           <div class="row">
             <label for="softness" data-i18n="softness">柔化</label>

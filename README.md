@@ -11,9 +11,11 @@ https://video-matting-to-svg.gigass.deno.net/
 - WebGL‑accelerated chroma key with interactive color picking (click or drag to sample)
 - Fine‑tuning controls: Threshold, Softness, Spill Suppression, Sharpen, Pixelation
 - Per‑clip mask painting to preserve original video regions in selected time ranges
+- Crop tool: enable/edit/confirm; no‑stretch preview with letterbox/pillarbox; exports use cropped size
 - Background modes: Transparent or Solid; optional preview background image for the SVG preview area
 - One‑click export to animated SVG with inline preview and direct download
 - New: PNG Spritesheet export
+- Robust masking: masks are painted/sampled in source UV (video resolution) so they align perfectly across crop/scale/export
 
 ## How It Works
 
@@ -29,8 +31,9 @@ All computation happens locally; your media never leaves the browser.
 1) Open `index.html` in a modern browser (Chrome, Edge, Safari).
 2) Load a video (button “选择视频” or drag & drop onto the stage).
 3) Click “拾取键色” (Pick Key Color) and click/drag on the background region.
-4) Adjust Threshold/Softness/Spill/Sharpen; optionally add clips and paint masks.
-5) In “导出 SVG 动画”, set FPS, Scale, Frame Format (WebP/PNG) and Quality, then export.
+4) Optional: enable “裁切” (Crop), click “编辑裁切”, adjust the box, then “确认裁切”.
+5) Adjust Threshold/Softness/Spill/Sharpen; optionally add clips and paint masks.
+6) In “导出 SVG 动画”, set FPS, Scale, Frame Format (WebP/PNG) and Quality, then export.
 
 ## Basic Workflow (Step‑by‑Step)
 
@@ -52,7 +55,10 @@ All computation happens locally; your media never leaves the browser.
    - Sharpen: subtle sharpening of the result.
    - Pixelation: for stylized preview; matched during export for consistent look.
 
-4) Improve details with Exclude Regions (optional)
+4) Crop (optional)
+   - Enable Crop, click Edit Crop to adjust; the preview letterboxes to avoid stretch. Confirm to lock.
+   - Exports render at the cropped resolution, no padding.
+5) Improve details with Exclude Regions (optional)
    - Add Clip: defines a time range to paint a mask for restoring original video.
    - Move/Resize: drag the clip or its handles in the timeline.
    - Brush+: paint areas to keep the original video (not keyed out).
@@ -186,6 +192,7 @@ All computation happens locally; your media never leaves the browser.
    - Transparent keeps alpha; Solid composites to a chosen color; a preview background image can be applied behind the SVG preview only.
 6) Export animated SVG
    - Set FPS/Scale/Format/Quality, optionally Include Background, start export, then preview and download.
+   - Exported size equals crop size × scale when crop is enabled.
 
 ### Export Settings <a id="en-export"></a>
 - FPS: 6–12 is typically smooth with reasonable output size.
@@ -232,9 +239,11 @@ https://video-matting-to-svg.gigass.deno.net/
 - WebGL 加速抠像，支持点击/框选拾取键色
 - 可调参数：阈值、柔化、溢色抑制、锐化、像素化
 - 按时间片段进行掩膜绘制：保留原视频区域或擦除已保留区域
+- 裁切工具：启用/编辑/确认；预览使用信箱/柱箱避免拉伸；导出按裁切后尺寸输出
 - 背景模式：透明/纯色；可为导出预览区域叠加“预览背景图”
 - 一键导出 SVG 动画，内联预览与直接下载
 - 新增 PNG Spritesheet 导出
+- 更稳的掩膜：掩膜在“源 UV（视频分辨率）”空间绘制/采样，裁切/缩放/导出均严格对齐
 
 ### 工作原理 <a id="zh-how"></a>
 1. 使用 GPU 着色器对视频与选定键色进行抠像。
@@ -248,16 +257,18 @@ https://video-matting-to-svg.gigass.deno.net/
 1) 用浏览器打开 `index.html`（Chrome/Edge/Safari 等现代浏览器）。
 2) 点击“选择视频”或将视频拖拽到舞台区域。
 3) 点击“拾取键色”，在画面上点击或拖拽框选背景区域。
-4) 视情况调整“阈值/柔化/溢色抑制/锐化/像素化”，可添加片段并绘制掩膜。
-5) 在“导出 SVG 动画”中设置帧率、分辨率、编码与质量，点击导出。
+4) 可选：启用“裁切”，点击“编辑裁切”调整，完成后点击“确认裁切”。
+5) 视情况调整“阈值/柔化/溢色抑制/锐化/像素化”，可添加片段并绘制掩膜。
+6) 在“导出 SVG 动画”中设置帧率、分辨率、编码与质量，点击导出。
 
 ### 基础工作流（一步步上手） <a id="zh-workflow"></a>
 1) 导入视频：选择或拖拽，状态栏显示分辨率与时长，可播放/定位。
 2) 拾取键色：点击或框选取样，建议选择具有代表性的背景区域。
-3) 调整参数：阈值控制范围，柔化平滑边缘，溢色抑制减少溢色，锐化提升细节，像素化用于风格化预览（导出匹配）。
-4) 片段与掩膜（可选）：添加片段后，用画笔+保留原视频区域，画笔−擦除保留；可拖动/缩放片段并“重置”。
+3) 调整参数：阈值控制范围（默认 0.28 建议起点），柔化平滑边缘，溢色抑制减少溢色，锐化提升细节，像素化用于风格化预览（导出匹配）。
+4) 裁切（可选）：启用并“编辑裁切”后，预览采用信箱/柱箱避免拉伸；“确认裁切”后导出按裁切尺寸输出，无黑边。
+5) 片段与掩膜（可选）：添加片段后，用画笔+保留原视频区域，画笔−擦除保留；可拖动/缩放片段并“重置”。
 5) 预览背景（可选）：透明/纯色，可为导出预览叠加单独的背景图。
-6) 导出：可选择导出 SVG 动画或 PNG Spritesheet。SVG 可选编码与质量；Spritesheet 仅导出 PNG。
+6) 导出：可选择导出 SVG 动画或 PNG Spritesheet。SVG 可选编码与质量；Spritesheet 仅导出 PNG。启用裁切时导出分辨率=裁切尺寸×分辨率比例。
 
 ### 导出设置 <a id="zh-export"></a>
 - 帧率：6–12 通常足够流畅且体积可控。
