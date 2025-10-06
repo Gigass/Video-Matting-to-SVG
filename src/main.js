@@ -1446,7 +1446,8 @@ function loopRVFC(now, metadata) {
       // 由着色器完成像素化，这里仅缩放到输出尺寸并保留块感
       outCtx.clearRect(0, 0, outW, outH);
       outCtx.imageSmoothingEnabled = false;
-      outCtx.drawImage(els.canvas, 0, 0, srcW, srcH, 0, 0, outW, outH);
+      // 注意：源区域应取导出时实际渲染尺寸 useW/useH，避免比例错误
+      outCtx.drawImage(els.canvas, 0, 0, useW, useH, 0, 0, outW, outH);
       const url = await encodeFrame(outCanvas, state.frameFormat, state.webpQuality);
       images.push(url);
       updateProgress((i+1)/N);
