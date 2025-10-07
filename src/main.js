@@ -28,6 +28,7 @@
       bgSolid: '纯色',
       exportTitle: '导出 SVG 动画',
       exportSpritesheet: '导出 Spritesheet',
+      exportFramesZip: '导出序列帧 ZIP',
       fps: '帧率',
       scale: '分辨率',
       frameFormat: '帧编码',
@@ -51,11 +52,14 @@
       noDuration: '无法获取视频时长',
       exporting: '正在生成 SVG 动画...',
       exportingSheet: '正在生成 Spritesheet（PNG）...',
+      exportingZipFrames: '正在导出序列帧（ZIP）...',
       tooManyFrames: '帧数较多，限制导出至 {N} 帧（{fps}fps 上限 {max}）',
       exportCanceled: '已取消导出',
       exportDone: 'SVG 生成完成并预览，帧数 {N}，时长 {s}s',
       sheetExportDone: 'Spritesheet 生成完成，帧数 {N}，尺寸 {w}×{h}',
+      framesZipDone: '序列帧 ZIP 生成完成，帧数 {N}',
       downloadSheet: '下载 PNG Spritesheet',
+      downloadFramesZip: '下载序列帧 ZIP',
       svgPreviewAlt: 'SVG 预览',
       actualExport: '实际导出：{w}×{h}',
       clipLabel: '片段',
@@ -88,6 +92,7 @@
       bgSolid: 'Solid',
       exportTitle: 'Export SVG Animation',
       exportSpritesheet: 'Export Spritesheet',
+      exportFramesZip: 'Export Frames ZIP',
       fps: 'FPS',
       scale: 'Scale',
       frameFormat: 'Frame Format',
@@ -110,11 +115,14 @@
       noDuration: 'Cannot get video duration',
       exporting: 'Generating SVG animation...',
       exportingSheet: 'Generating Spritesheet (PNG)...',
+      exportingZipFrames: 'Exporting frames (ZIP)...',
       tooManyFrames: 'Too many frames; limited to {N} (fps {fps}, max {max})',
       exportCanceled: 'Export canceled',
       exportDone: 'SVG generated, frames {N}, duration {s}s',
       sheetExportDone: 'Spritesheet generated, frames {N}, size {w}×{h}',
+      framesZipDone: 'Frames ZIP generated, frames {N}',
       downloadSheet: 'Download PNG Spritesheet',
+      downloadFramesZip: 'Download Frames ZIP',
       svgPreviewAlt: 'SVG Preview',
       actualExport: 'Actual export: {w}×{h}',
       clipLabel: 'Clip',
@@ -177,6 +185,7 @@
     resetBtn: document.getElementById('resetBtn'),
     exportSvgAnimBtn: document.getElementById('exportSvgAnimBtn'),
     exportSpritesheetBtn: document.getElementById('exportSpritesheetBtn'),
+    exportFramesZipBtn: document.getElementById('exportFramesZipBtn'),
     cancelSvgExportBtn: document.getElementById('cancelSvgExportBtn'),
     cropEnable: document.getElementById('cropEnable'),
     cropEditBtn: document.getElementById('cropEditBtn'),
@@ -1003,6 +1012,7 @@ function loopRVFC(now, metadata) {
 
   els.exportSvgAnimBtn.addEventListener('click', startExportSvgAnimation);
   if (els.exportSpritesheetBtn) els.exportSpritesheetBtn.addEventListener('click', startExportSpritesheet);
+  if (els.exportFramesZipBtn) els.exportFramesZipBtn.addEventListener('click', startExportFramesZip);
   els.cancelSvgExportBtn.addEventListener('click', cancelExportSvg);
   if (els.scaleSelect) els.scaleSelect.addEventListener('change', ()=>{ state.scale = Math.max(0.1, Math.min(1, parseFloat(els.scaleSelect.value)||0.5)); });
   // 更新分辨率实际像素显示
@@ -1216,6 +1226,7 @@ function loopRVFC(now, metadata) {
     els.resetBtn.disabled = false;
     els.exportSvgAnimBtn.disabled = false;
     if (els.exportSpritesheetBtn) els.exportSpritesheetBtn.disabled = false;
+    if (els.exportFramesZipBtn) els.exportFramesZipBtn.disabled = false;
     if (els.playPauseBtn) els.playPauseBtn.disabled = false;
     if (els.addClipBtn) els.addClipBtn.disabled = false;
     if (els.cropEditBtn) els.cropEditBtn.disabled = !state.cropEnabled;
@@ -1515,6 +1526,7 @@ function loopRVFC(now, metadata) {
     els.cancelSvgExportBtn.disabled = true;
     els.exportSvgAnimBtn.disabled = !state.hasVideo;
     if (els.exportSpritesheetBtn) els.exportSpritesheetBtn.disabled = !state.hasVideo;
+    if (els.exportFramesZipBtn) els.exportFramesZipBtn.disabled = !state.hasVideo;
     els.pickColorBtn.disabled = !state.hasVideo;
     if (canceled) updateProgress(0);
   }
@@ -1664,6 +1676,220 @@ function loopRVFC(now, metadata) {
 
     finishSvgExport();
     if (wasPlaying) els.video.play().catch(()=>{});
+  }
+
+
+  // 导出序列帧 ZIP（基于与 Spritesheet 相同的逐帧采样）
+  async function startExportFramesZip() {
+    if (!state.hasVideo || state.exporting) return;
+    const fps = Math.max(1, Math.min(24, parseInt(els.fpsInput?.value || '8', 10) || 8));
+    const duration = Math.max(0, els.video.duration || 0);
+    if (!duration) { setStatus(t('noDuration')); return; }
+
+    state.exporting = true;
+    state.cancelExport = false;
+    els.exportSvgAnimBtn.disabled = true;
+    if (els.exportSpritesheetBtn) els.exportSpritesheetBtn.disabled = true;
+    if (els.exportFramesZipBtn) els.exportFramesZipBtn.disabled = true;
+    els.cancelSvgExportBtn.disabled = false;
+    els.pickColorBtn.disabled = true;
+    els.exportResult.innerHTML = '';
+    setStatus(t('exportingZipFrames'));
+    updateProgress(0);
+
+    const wasPlaying = !els.video.paused;
+    try { els.video.pause(); } catch(_) {}
+
+    // 提升到源分辨率渲染
+    const prevCssW = els.canvas.style.width;
+    const prevCssH = els.canvas.style.height;
+    const prevW = els.canvas.width, prevH = els.canvas.height;
+    const srcW = els.video.videoWidth|0, srcH = els.video.videoHeight|0;
+    const cx0 = state.cropEnabled ? Math.min(state.crop.x0, state.crop.x1) : 0;
+    const cy0 = state.cropEnabled ? Math.min(state.crop.y0, state.crop.y1) : 0;
+    const cx1 = state.cropEnabled ? Math.max(state.crop.x0, state.crop.x1) : 1;
+    const cy1 = state.cropEnabled ? Math.max(state.crop.y0, state.crop.y1) : 1;
+    const cropW = Math.max(1, Math.round((cx1 - cx0) * srcW));
+    const cropH = Math.max(1, Math.round((cy1 - cy0) * srcH));
+    const useW = state.cropEnabled ? cropW : srcW;
+    const useH = state.cropEnabled ? cropH : srcH;
+    els.canvas.style.width = `${useW}px`;
+    els.canvas.style.height = `${useH}px`;
+    els.canvas.width = useW; els.canvas.height = useH;
+    gl.viewport(0, 0, useW, useH);
+    fillCropOverride = state.cropEnabled ? 1 : 0;
+
+    // 帧数限制（与 SVG 导出一致的保护）
+    const totalFrames = Math.max(1, Math.floor(duration * fps));
+    const maxFrames = 600;
+    const N = Math.min(totalFrames, maxFrames);
+    if (N < totalFrames) setStatus(t('tooManyFrames', { N, fps, max: maxFrames }));
+
+    // 输出尺寸（按缩放）
+    const scale = Math.max(0.1, Math.min(1, state.scale || parseFloat(els.scaleSelect?.value || '1') || 1));
+    const outW = Math.max(1, Math.round(useW * scale));
+    const outH = Math.max(1, Math.round(useH * scale));
+
+    const tile = document.createElement('canvas');
+    tile.width = outW; tile.height = outH;
+    const tctx = tile.getContext('2d');
+    tctx.imageSmoothingEnabled = false;
+
+    const seekTo = (t) => new Promise((res, rej) => {
+      const onSeeked = () => { els.video.removeEventListener('seeked', onSeeked); res(); };
+      els.video.addEventListener('seeked', onSeeked, { once: true });
+      try { els.video.currentTime = Math.min(duration, Math.max(0, t)); } catch (e) { els.video.removeEventListener('seeked', onSeeked); rej(e); }
+    });
+    const epsilon = 1e-4;
+
+    // 导出时的像素化块大小与缩放一致
+    const exportPixel = Math.max(1, Math.round((state.pixelSize || 1) * (useW / Math.max(1, Math.round(useW * scale)))));
+    pixelOverride = exportPixel;
+
+    const files = [];
+    for (let i = 0; i < N; i++) {
+      if (state.cancelExport) break;
+      const t = Math.min(duration - epsilon, i / fps);
+      await seekTo(t);
+      renderFrame();
+      tctx.clearRect(0, 0, outW, outH);
+      tctx.drawImage(els.canvas, 0, 0, useW, useH, 0, 0, outW, outH);
+      const url = await encodeFrame(tile, state.frameFormat, state.webpQuality);
+      const { bytes, ext } = dataURLToBytes(url);
+      const name = `frame_${String(i+1).padStart(String(N).length,'0')}.${ext}`;
+      files.push({ name, data: bytes });
+      updateProgress((i+1)/N);
+      await new Promise(r => setTimeout(r, 0));
+    }
+
+    // 还原尺寸
+    els.canvas.style.width = prevCssW;
+    els.canvas.style.height = prevCssH;
+    els.canvas.width = prevW; els.canvas.height = prevH;
+    gl.viewport(0, 0, prevW, prevH);
+    fillCropOverride = null;
+    pixelOverride = null;
+
+    if (state.cancelExport) { finishSvgExport(true); setStatus(t('exportCanceled')); if (wasPlaying) els.video.play().catch(()=>{}); return; }
+
+    // 写入 ZIP（无压缩）
+    const zipBlob = writeZipStore(files);
+    const url = URL.createObjectURL(zipBlob);
+    els.exportResult.innerHTML = '';
+    const a = document.createElement('a');
+    a.href = url; a.download = 'frames.zip'; a.textContent = t('downloadFramesZip');
+    els.exportResult.appendChild(a);
+    setStatus(t('framesZipDone', { N }));
+
+    finishSvgExport();
+    if (wasPlaying) els.video.play().catch(()=>{});
+    setTimeout(()=> URL.revokeObjectURL(url), 30000);
+  }
+
+  // 将 dataURL 转为字节（并推断扩展名）
+  function dataURLToBytes(u) {
+    const m = /^data:(.*?);base64,(.*)$/.exec(u||'');
+    const b64 = m ? m[2] : '';
+    const mime = (m ? m[1] : 'application/octet-stream').toLowerCase();
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+    let ext = 'bin';
+    if (mime.includes('image/webp')) ext = 'webp';
+    else if (mime.includes('png')) ext = 'png';
+    else if (mime.includes('jpeg')) ext = 'jpg';
+    return { bytes, ext };
+  }
+
+  // 计算 CRC32（查表法）
+  const _crcTable = (()=>{
+    const tbl = new Uint32Array(256);
+    for (let n=0; n<256; n++) {
+      let c = n;
+      for (let k=0; k<8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      tbl[n] = c >>> 0;
+    }
+    return tbl;
+  })();
+  function crc32(bytes) {
+    let c = 0 ^ (-1);
+    for (let i=0;i<bytes.length;i++) c = (c>>>8) ^ _crcTable[(c ^ bytes[i]) & 0xFF];
+    return (c ^ (-1)) >>> 0;
+  }
+
+  function dosTimeDate(d=new Date()) {
+    const year = d.getFullYear();
+    const dosDate = ((year-1980) << 9) | ((d.getMonth()+1) << 5) | d.getDate();
+    const dosTime = (d.getHours() << 11) | (d.getMinutes() << 5) | (Math.floor(d.getSeconds()/2));
+    return { dosDate: dosDate & 0xFFFF, dosTime: dosTime & 0xFFFF };
+  }
+
+  // 生成 ZIP（store：无压缩）
+  function writeZipStore(files) {
+    // files: [{ name, data:Uint8Array }]
+    const enc = new TextEncoder();
+    const chunks = [];
+    const central = [];
+    let offset = 0;
+    const { dosDate, dosTime } = dosTimeDate();
+    for (const f of files) {
+      const nameBytes = enc.encode(f.name);
+      const crc = crc32(f.data);
+      const localHeader = new Uint8Array(30 + nameBytes.length);
+      const dv = new DataView(localHeader.buffer);
+      dv.setUint32(0, 0x04034b50, true); // local file header sig
+      dv.setUint16(4, 20, true); // version needed
+      dv.setUint16(6, 0x0800, true); // general purpose (UTF-8)
+      dv.setUint16(8, 0, true); // method store
+      dv.setUint16(10, dosTime, true);
+      dv.setUint16(12, dosDate, true);
+      dv.setUint32(14, crc, true);
+      dv.setUint32(18, f.data.length, true); // comp size
+      dv.setUint32(22, f.data.length, true); // uncomp size
+      dv.setUint16(26, nameBytes.length, true);
+      dv.setUint16(28, 0, true); // extra len
+      localHeader.set(nameBytes, 30);
+      chunks.push(localHeader, f.data);
+
+      const centralHeader = new Uint8Array(46 + nameBytes.length);
+      const dv2 = new DataView(centralHeader.buffer);
+      dv2.setUint32(0, 0x02014b50, true); // central dir sig
+      dv2.setUint16(4, 20, true); // version made by
+      dv2.setUint16(6, 20, true); // version needed
+      dv2.setUint16(8, 0x0800, true); // flags
+      dv2.setUint16(10, 0, true); // method
+      dv2.setUint16(12, dosTime, true);
+      dv2.setUint16(14, dosDate, true);
+      dv2.setUint32(16, crc, true);
+      dv2.setUint32(20, f.data.length, true);
+      dv2.setUint32(24, f.data.length, true);
+      dv2.setUint16(28, nameBytes.length, true);
+      dv2.setUint16(30, 0, true); // extra len
+      dv2.setUint16(32, 0, true); // comment len
+      dv2.setUint16(34, 0, true); // disk number
+      dv2.setUint16(36, 0, true); // internal attrs
+      dv2.setUint32(38, 0, true); // external attrs
+      dv2.setUint32(42, offset, true); // local header offset
+      centralHeader.set(nameBytes, 46);
+      central.push(centralHeader);
+
+      offset += localHeader.length + f.data.length;
+    }
+    const centralSize = central.reduce((s, u) => s + u.length, 0);
+    const centralOffset = offset;
+    const eocd = new Uint8Array(22);
+    const dv3 = new DataView(eocd.buffer);
+    dv3.setUint32(0, 0x06054b50, true);
+    dv3.setUint16(4, 0, true); // disk
+    dv3.setUint16(6, 0, true); // start disk
+    dv3.setUint16(8, files.length, true);
+    dv3.setUint16(10, files.length, true);
+    dv3.setUint32(12, centralSize, true);
+    dv3.setUint32(16, centralOffset, true);
+    dv3.setUint16(20, 0, true); // comment len
+
+    const all = new Blob([...chunks, ...central, eocd], { type: 'application/zip' });
+    return all;
   }
 
 
