@@ -292,6 +292,7 @@
     uniform int u_bgMode;       // 0 transparent, 1 solid
     uniform vec3 u_bgColor;     // bg solid color
     uniform vec2 u_viewSize;    // canvas size in pixels
+    uniform vec2 u_srcSize;     // source video size in pixels
     uniform float u_pixel;      // pixelation block size in output pixels
     uniform float u_sharpen;    // 0..1 amount
     uniform sampler2D u_mask;   // exclusion mask (0..1), 1 means use original video
@@ -322,8 +323,11 @@
       vec2 dr0 = vec2(0.0);
       vec2 dr1 = vec2(1.0);
       if (u_fillCrop == 0) {
-        vec2 csz = u_crop1 - u_crop0;
-        float cropAR = csz.x / max(1e-6, csz.y);
+        // compute crop aspect using source pixel size to avoid assuming 1:1
+        vec2 csz = max(u_crop1 - u_crop0, vec2(1e-6));
+        float cropWpx = u_srcSize.x * csz.x;
+        float cropHpx = u_srcSize.y * csz.y;
+        float cropAR = cropWpx / max(1e-6, cropHpx);
         float dispAR = u_viewSize.x / max(1.0, u_viewSize.y);
         if (dispAR > cropAR) {
           float w = cropAR / dispAR; dr0.x = (1.0 - w) * 0.5; dr1.x = 1.0 - dr0.x;
@@ -342,8 +346,9 @@
       vec4 src = texture2D(u_tex, uvc);
       vec3 col = toLinear(src.rgb);
       // simple unsharp mask in linear space (4-neighbor)
-      vec2 texel = 1.0 / max(u_viewSize, vec2(1.0));
-      vec2 texelUV = (u_crop1 - u_crop0) * (texel / region); // neighbor step respecting display region scale
+      // neighbor step should respect source resolution, not canvas
+      vec2 texel = 1.0 / max(u_srcSize, vec2(1.0));
+      vec2 texelUV = texel; // directly in UV of source texture
       vec3 nb1 = toLinear(texture2D(u_tex, uvc + vec2(texelUV.x, 0.0)).rgb);
       vec3 nb2 = toLinear(texture2D(u_tex, uvc + vec2(-texelUV.x, 0.0)).rgb);
       vec3 nb3 = toLinear(texture2D(u_tex, uvc + vec2(0.0, texelUV.y)).rgb);
@@ -424,6 +429,7 @@
     u_bgMode: gl.getUniformLocation(program, 'u_bgMode'),
     u_bgColor: gl.getUniformLocation(program, 'u_bgColor'),
     u_viewSize: gl.getUniformLocation(program, 'u_viewSize'),
+    u_srcSize: gl.getUniformLocation(program, 'u_srcSize'),
     u_pixel: gl.getUniformLocation(program, 'u_pixel'),
     u_sharpen: gl.getUniformLocation(program, 'u_sharpen'),
     u_mask: gl.getUniformLocation(program, 'u_mask'),
@@ -548,6 +554,7 @@
     const bg = hexToRgb01(els.bgColor.value);
     gl.uniform3fv(uniforms.u_bgColor, new Float32Array(bg.map(srgbToLinear01)));
     gl.uniform2f(uniforms.u_viewSize, els.canvas.width, els.canvas.height);
+    gl.uniform2f(uniforms.u_srcSize, Math.max(1, els.video.videoWidth||1), Math.max(1, els.video.videoHeight||1));
     const px = Math.max(1, (pixelOverride != null ? pixelOverride : state.pixelSize) || 1);
     gl.uniform1f(uniforms.u_pixel, px);
     gl.uniform1f(uniforms.u_sharpen, Math.max(0.0, Math.min(1.0, state.sharpen || 0)));
@@ -661,9 +668,10 @@
   // Compute display region (normalized 0..1 in canvas) matching shader letterbox logic
   function getDisplayRegionRect(){
     const cu = state.cropEnabled ? state.crop : {x0:0,y0:0,x1:1,y1:1};
-    const cszx = Math.max(1e-6, Math.abs(cu.x1 - cu.x0));
-    const cszy = Math.max(1e-6, Math.abs(cu.y1 - cu.y0));
-    const cropAR = cszx / cszy;
+    const vw = Math.max(1, els.video.videoWidth||1), vh = Math.max(1, els.video.videoHeight||1);
+    const cropWpx = Math.max(1e-6, Math.abs(cu.x1 - cu.x0) * vw);
+    const cropHpx = Math.max(1e-6, Math.abs(cu.y1 - cu.y0) * vh);
+    const cropAR = cropWpx / cropHpx;
     const dispAR = (els.canvas.width||1) / Math.max(1, els.canvas.height||1);
     let x0=0, y0=0, x1=1, y1=1;
     if (dispAR > cropAR) {
